@@ -1,1 +1,0 @@
-{"http://worker1:8080":{"Address":"http://worker1:8080","IsHealthy":true,"LastHealthCheck":"2024-07-29T11:53:38.953479+02:00"},"http://worker2:8080":{"Address":"http://worker2:8080","IsHealthy":false,"LastHealthCheck":"2024-07-29T11:53:38.962362+02:00"}}

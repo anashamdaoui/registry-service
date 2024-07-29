@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"net/url"
 	"registry-service/internal/registry"
 
 	"github.com/gorilla/mux"
@@ -29,7 +30,17 @@ func StartServer(reg *registry.Registry, router *mux.Router, ready chan struct{}
 		vars := mux.Vars(r)
 		address := vars["address"]
 		log.Printf("Received health check request for address: %s", address)
-		worker, found := reg.GetWorker(address)
+
+		// Decode the URL-encoded address
+		decodedAddress, err := url.QueryUnescape(address)
+		if err != nil {
+			log.Printf("Failed to decode address: %v", err)
+			http.Error(w, "Invalid address", http.StatusBadRequest)
+			return
+		}
+
+		log.Printf("Decoded address: %s", decodedAddress)
+		worker, found := reg.GetWorker(decodedAddress)
 		if !found {
 			http.NotFound(w, r)
 			return

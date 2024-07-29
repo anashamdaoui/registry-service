@@ -5,9 +5,9 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"registry-service/internal/registry"
 	"registry-service/internal/server"
-	"strings"
 	"testing"
 	"time"
 
@@ -28,7 +28,16 @@ func setupServer(port string) (*registry.Registry, *mux.Router, *http.Server) {
 	return reg, router, srv
 }
 
+func cleanupWorkersFile() {
+	if err := os.Remove("workers.json"); err != nil && !os.IsNotExist(err) {
+		log.Printf("Failed to remove workers.json: %v", err)
+	} else {
+		log.Println("workers.json file removed successfully.")
+	}
+}
+
 func TestRegisterEndpoint(t *testing.T) {
+	defer cleanupWorkersFile()
 	log.Println("Setting up server for TestRegisterEndpoint...")
 	reg, _, srv := setupServer("8081")
 	defer srv.Close()
@@ -58,42 +67,49 @@ func TestRegisterEndpoint(t *testing.T) {
 }
 
 func TestHealthEndpoint(t *testing.T) {
+	defer cleanupWorkersFile()
 	log.Println("Setting up server for TestHealthEndpoint...")
-	reg, router, srv := setupServer("8082")
+	reg, _, srv := setupServer("8082")
 	defer srv.Close()
 
-	address := "http://worker1:8080"
+	// Start a mock HTTP server to simulate the worker
+	mockWorker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("Mock worker received request for: %s", r.URL.Path)
+		if r.URL.Path == "/healthcheck" {
+			log.Println("Mock worker responding with 200 OK")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("OK"))
+		} else {
+			log.Println("Mock worker responding with 404 Not Found")
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer mockWorker.Close()
+
+	address := mockWorker.URL
 	log.Printf("Registering worker with address: %s", address)
 	reg.RegisterWorker(address)
 
-	// Strip the protocol from the address for the path variable
-	addressPath := strings.TrimPrefix(address, "http://")
-	url := "/worker/health/" + addressPath
-	log.Printf("Sending health check request to URL: %s", url)
-	req := httptest.NewRequest("GET", url, nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	// Call CheckAllWorkers to update the health status of the worker
+	reg.CheckAllWorkers()
 
-	log.Printf("Received response: %v", w.Code)
-	log.Printf("Response body: %v", w.Body.String())
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("Expected status 200 OK, got %d", w.Code)
+	// Verify the worker's health status
+	worker, exists := reg.GetWorker(address)
+	if !exists {
+		t.Fatalf("Expected worker to be found")
 	}
-
-	var worker registry.Worker
-	err := json.NewDecoder(w.Body).Decode(&worker)
-	if err != nil {
-		t.Fatalf("Failed to decode response: %v", err)
+	if !worker.IsHealthy {
+		t.Fatalf("Expected worker to be healthy, got unhealthy")
 	}
-
 	if worker.Address != address {
-		t.Errorf("Expected address %s, got %s", address, worker.Address)
+		t.Fatalf("Expected worker address to be %s, got %s", address, worker.Address)
 	}
+
 	log.Println("TestHealthEndpoint completed successfully.")
 }
 
 func TestHealthyWorkersEndpoint(t *testing.T) {
+	defer cleanupWorkersFile()
 	log.Println("Setting up server for TestHealthyWorkersEndpoint...")
 	reg, router, srv := setupServer("8083")
 	defer srv.Close()

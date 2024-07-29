@@ -55,9 +55,9 @@ func (r *Registry) CheckAllWorkers() {
 	workers := r.workers
 	r.mutex.Unlock()
 
-	for address, worker := range workers {
-		log.Printf("Checking health of worker at address: %s", worker.Address)
-		resp, err := http.Get("http://" + address + "/healthcheck")
+	for address := range workers {
+		log.Printf("Checking health of worker at address %s", address)
+		resp, err := http.Get(address + "/healthcheck")
 		isHealthy := err == nil && resp.StatusCode == http.StatusOK
 		r.UpdateHealth(address, isHealthy)
 	}
