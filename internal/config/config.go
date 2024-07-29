@@ -1,0 +1,32 @@
+package config
+
+import (
+	"encoding/json"
+	"io/ioutil"
+	"log"
+	"os"
+)
+
+type Config struct {
+	LogLevel string `json:"log_level"`
+	Port     string `json:"port"`
+}
+
+var AppConfig Config
+
+func LoadConfig(configFile string) {
+	file, err := os.Open(configFile)
+	if err != nil {
+		log.Fatalf("Failed to open config file: %v", err)
+	}
+	defer file.Close()
+
+	bytes, err := ioutil.ReadAll(file)
+	if err != nil {
+		log.Fatalf("Failed to read config file: %v", err)
+	}
+
+	if err = json.Unmarshal(bytes, &AppConfig); err != nil {
+		log.Fatalf("Failed to unmarshal config file: %v", err)
+	}
+}

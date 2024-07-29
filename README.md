@@ -10,6 +10,19 @@ The Registry Service is responsible for managing worker registration, health sta
 - Persist worker data to disk
 - Load worker data from disk on startup
 
+## Configuration
+
+The configuration for the registry service is defined in a `config.json` file. Here is an example configuration:
+
+```json
+{
+  "log_level": "DEBUG",
+  "port": "8080"
+}
+```
+- log_level: Defines the verbosity of logs. Set to "DEBUG" for detailed logging.
+- port: The port on which the registry service will run.
+
 ### Endpoints
 
 - `/register?address={worker_address}`: Register a new worker.
@@ -33,3 +46,13 @@ This command runs both unit tests and integration tests.
 
 ## Clean the Project
 make clean
+
+### Using Docker
+1. Build the Docker image:
+```bash
+docker build -t registry-service .
+```
+2. Run the Docker container
+```bash
+docker run -p 8080:8080 registry-service
+```

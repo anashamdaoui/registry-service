@@ -3,6 +3,7 @@ package registry
 import (
 	"log"
 	"net/http"
+	"registry-service/internal/config"
 	"sync"
 	"time"
 )
@@ -12,16 +13,22 @@ type Registry struct {
 	workers map[string]*Worker
 }
 
+func logDetail(message string) {
+	if config.AppConfig.LogLevel == "DEBUG" {
+		log.Println(message)
+	}
+}
+
 func NewRegistry() *Registry {
 	r := &Registry{
 		workers: make(map[string]*Worker),
 	}
-	r.LoadWorkers() // Load workers from persistence on startup
+	r.LoadWorkers()
 	return r
 }
 
 func (r *Registry) RegisterWorker(address string) {
-	log.Println("Starting RegisterWorker...")
+	logDetail("Starting RegisterWorker...")
 	r.mutex.Lock()
 	r.workers[address] = &Worker{
 		Address:         address,
@@ -29,28 +36,28 @@ func (r *Registry) RegisterWorker(address string) {
 		LastHealthCheck: time.Now(),
 	}
 	r.mutex.Unlock()
-	log.Println("Worker registered, saving workers...")
-	r.SaveWorkers() // Save state after registering a worker
-	log.Println("Completed RegisterWorker.")
+	logDetail("Worker registered, saving workers...")
+	r.SaveWorkers()
+	logDetail("Completed RegisterWorker.")
 }
 
 func (r *Registry) UpdateHealth(address string, isHealthy bool) {
-	log.Println("Starting UpdateHealth...")
+	logDetail("Starting UpdateHealth...")
 	r.mutex.Lock()
 	if worker, exists := r.workers[address]; exists {
-		log.Printf("Updating health status for worker at address: %s to %v", address, isHealthy)
+		logDetail("Updating health status for worker at address: " + address)
 		worker.IsHealthy = isHealthy
 		worker.LastHealthCheck = time.Now()
-		log.Printf("Worker health updated at address: %s", address)
+		logDetail("Worker health updated at address: " + address)
 	}
 	r.mutex.Unlock()
-	log.Println("Saving workers after health update...")
-	r.SaveWorkers() // Save state after updating health
-	log.Println("Completed UpdateHealth.")
+	logDetail("Saving workers after health update...")
+	r.SaveWorkers()
+	logDetail("Completed UpdateHealth.")
 }
 
 func (r *Registry) CheckAllWorkers() {
-	log.Println("Starting CheckAllWorkers...")
+	logDetail("Starting CheckAllWorkers...")
 	r.mutex.Lock()
 	workers := r.workers
 	r.mutex.Unlock()
@@ -61,20 +68,20 @@ func (r *Registry) CheckAllWorkers() {
 		isHealthy := err == nil && resp.StatusCode == http.StatusOK
 		r.UpdateHealth(address, isHealthy)
 	}
-	log.Println("Completed CheckAllWorkers.")
+	logDetail("Completed CheckAllWorkers.")
 }
 
 func (r *Registry) GetWorker(address string) (*Worker, bool) {
-	log.Println("Starting GetWorker...")
+	logDetail("Starting GetWorker...")
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 	worker, exists := r.workers[address]
-	log.Println("Completed GetWorker.")
+	logDetail("Completed GetWorker.")
 	return worker, exists
 }
 
 func (r *Registry) GetHealthyWorkers() []*Worker {
-	log.Println("Starting GetHealthyWorkers...")
+	logDetail("Starting GetHealthyWorkers...")
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 	var healthyWorkers []*Worker
@@ -83,6 +90,6 @@ func (r *Registry) GetHealthyWorkers() []*Worker {
 			healthyWorkers = append(healthyWorkers, worker)
 		}
 	}
-	log.Println("Completed GetHealthyWorkers.")
+	logDetail("Completed GetHealthyWorkers.")
 	return healthyWorkers
 }

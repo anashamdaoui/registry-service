@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"registry-service/internal/config"
 	"registry-service/internal/registry"
 	"registry-service/internal/server"
 	"syscall"
@@ -14,6 +15,9 @@ import (
 func main() {
 	log.Println("Starting registry service...")
 
+	// Load configuration
+	config.LoadConfig("config.json")
+
 	// Create a new registry
 	reg := registry.NewRegistry()
 
@@ -23,11 +27,8 @@ func main() {
 	// Channel to signal when the server is ready
 	ready := make(chan struct{})
 
-	// Define the port
-	port := "8080"
-
 	// Start the server in a separate goroutine
-	srv := server.StartServer(reg, router, ready, port)
+	srv := server.StartServer(reg, router, ready, config.AppConfig.Port)
 
 	// Wait for the server to signal readiness
 	<-ready
