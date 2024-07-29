@@ -12,7 +12,6 @@ import (
 
 // StartServer starts the HTTP server for the registry service and returns the server instance.
 func StartServer(reg *registry.Registry, router *mux.Router, ready chan struct{}, port string) *http.Server {
-	log.Println("Configuring routes...")
 
 	router.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
 		address := r.URL.Query().Get("address")
