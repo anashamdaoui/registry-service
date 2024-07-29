@@ -37,11 +37,14 @@ func (r *Registry) RegisterWorker(address string) {
 func (r *Registry) UpdateHealth(address string, isHealthy bool) {
 	log.Println("Starting UpdateHealth...")
 	r.mutex.Lock()
-	defer r.mutex.Unlock()
 	if worker, exists := r.workers[address]; exists {
+		log.Printf("Updating health status for worker at address: %s to %v", address, isHealthy)
 		worker.IsHealthy = isHealthy
 		worker.LastHealthCheck = time.Now()
+		log.Printf("Worker health updated at address: %s", address)
 	}
+	r.mutex.Unlock()
+	log.Println("Saving workers after health update...")
 	r.SaveWorkers() // Save state after updating health
 	log.Println("Completed UpdateHealth.")
 }
