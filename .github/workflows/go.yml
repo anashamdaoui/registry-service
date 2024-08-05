@@ -24,14 +24,14 @@ jobs:
     - name: Build
       run: go build -v ./...
 
+    - name: go-tidy-check
+      uses: katexochen/go-tidy-check@v2.0.1
+
     - name: Test
       run: go test -v ./...
     
     - name: Go Coverage
       uses: gwatts/go-coverage-action@v2.0.0
-
-    - name: go-tidy-check
-      uses: katexochen/go-tidy-check@v2.0.1
           
     - name: Staticcheck
       uses: dominikh/staticcheck-action@v1.3.1
