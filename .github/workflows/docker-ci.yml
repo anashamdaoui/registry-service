@@ -17,9 +17,6 @@ jobs:
     - name: Build the Docker image
       run: make docker-build
 
-    - uses: docker/scout-action@v1.12.0
-      with:
-        command: docker scout quickview
 
 
           
