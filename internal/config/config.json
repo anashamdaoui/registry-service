@@ -1,4 +1,4 @@
 {
   "log_level": "DEBUG",
-  "port": "8080"
+  "server_port": "9080"
 }

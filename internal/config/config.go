@@ -9,7 +9,7 @@ import (
 
 type Config struct {
 	LogLevel string `json:"log_level"`
-	Port     string `json:"port"`
+	Port     string `json:"server_port"`
 }
 
 var AppConfig Config

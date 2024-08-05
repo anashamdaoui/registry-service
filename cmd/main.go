@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/signal"
 	"registry-service/internal/config"
+	"registry-service/internal/middleware"
 	"registry-service/internal/registry"
 	"registry-service/internal/server"
 	"syscall"
@@ -16,7 +17,10 @@ func main() {
 	log.Println("Starting registry service...")
 
 	// Load configuration
-	config.LoadConfig("config.json")
+	config.LoadConfig("internal/config/config.json")
+
+	// Initialize the logger with the configured log level
+	middleware.InitLogger(config.AppConfig.LogLevel)
 
 	// Create a new registry
 	reg := registry.NewRegistry()

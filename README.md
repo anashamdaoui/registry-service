@@ -37,15 +37,21 @@ The Makefile includes targets to build, test, and clean the project.
 To build, test, and clean the project, use the following commands:
 
 ## Build the Project
+```bash
 make build
+```
 This command compiles the Go code and creates an executable in the bin directory.
 
 ## Test the Project
+```bash
 make test
+```
 This command runs both unit tests and integration tests.
 
 ## Clean the Project
+```bash
 make clean
+```
 
 ### Using Docker
 1. Build the Docker image:
