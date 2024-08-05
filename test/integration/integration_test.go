@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"registry-service/internal/config"
+	"registry-service/internal/middleware"
 	"registry-service/internal/registry"
 	"registry-service/internal/server"
 	"testing"
@@ -14,7 +16,14 @@ import (
 	"github.com/gorilla/mux"
 )
 
+// Initialize the logger for tests
+func initTestLogger() {
+	config.LoadConfig("config.json")
+	middleware.InitLogger(config.AppConfig.LogLevel)
+}
+
 func setupServer(port string) (*registry.Registry, *mux.Router, *http.Server) {
+	initTestLogger() // Initialize the logger
 	reg := registry.NewRegistry()
 	router := mux.NewRouter()
 	ready := make(chan struct{})
