@@ -6,7 +6,7 @@ jobs:
       # Use the official CircleCI Go image
       - image: cimg/go:1.22.5
 
-    working_directory: /go/src/github.com/anashamdaoui/registry-service
+    working_directory: /home/circleci/project
 
     steps:
       - checkout
