@@ -1,0 +1,34 @@
+version: 2.1
+
+jobs:
+  build-and-test:
+    docker:
+      # Use the official CircleCI Go image
+      - image: cimg/go:1.22.5
+
+    working_directory: /go/src/github.com/anashamdaoui/registry-service
+
+    steps:
+      - checkout
+
+      - run:
+          name: Install Dependencies
+          command: go mod download
+
+      - run:
+          name: Build Application
+          command: make build
+
+      - run:
+          name: Run Unit Tests
+          command: make test-unit
+
+      - run:
+          name: Run Integration Tests
+          command: make test-integration
+
+workflows:
+  version: 2
+  test:
+    jobs:
+      - build-and-test
