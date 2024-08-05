@@ -87,7 +87,9 @@ func TestHealthEndpoint(t *testing.T) {
 		if r.URL.Path == "/healthcheck" {
 			log.Println("Mock worker responding with 200 OK")
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("OK"))
+			if _, err := w.Write([]byte("OK")); err != nil {
+				log.Printf("Failed to write response: %v", err)
+			}
 		} else {
 			log.Println("Mock worker responding with 404 Not Found")
 			w.WriteHeader(http.StatusNotFound)
