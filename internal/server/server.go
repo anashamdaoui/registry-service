@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"registry-service/internal/middleware"
 	"registry-service/internal/registry"
 
 	"github.com/gorilla/mux"
@@ -13,32 +14,43 @@ import (
 // StartServer starts the HTTP server for the registry service and returns the server instance.
 func StartServer(reg *registry.Registry, router *mux.Router, ready chan struct{}, port string) *http.Server {
 
+	router.Use(middleware.RequestID)        // Add Request ID middleware
+	router.Use(middleware.LoggerMiddleware) // Add Logger middleware
+
 	router.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
+		requestID := middleware.GetRequestIDFromContext(r.Context())
+		logger := middleware.GetLogger()
+		logger.Debug(requestID, "Handling /register request")
+
 		address := r.URL.Query().Get("address")
 		if address == "" {
 			http.Error(w, "Missing address", http.StatusBadRequest)
 			return
 		}
-		log.Printf("Received register request for address: %s", address)
+		logger.Debug(requestID, "Received register request for address: %s", address)
 		reg.RegisterWorker(address)
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("Worker registered"))
 	}).Methods("GET")
 
 	router.HandleFunc("/worker/health/{address}", func(w http.ResponseWriter, r *http.Request) {
+		requestID := middleware.GetRequestIDFromContext(r.Context())
+		logger := middleware.GetLogger()
+		logger.Debug(requestID, "Handling /worker/health/{address} request")
+
 		vars := mux.Vars(r)
 		address := vars["address"]
-		log.Printf("Received health check request for address: %s", address)
+		logger.Debug(requestID, "Received health check request for address: %s", address)
 
 		// Decode the URL-encoded address
 		decodedAddress, err := url.QueryUnescape(address)
 		if err != nil {
-			log.Printf("Failed to decode address: %v", err)
+			logger.Debug(requestID, "Failed to decode address: %v", err)
 			http.Error(w, "Invalid address", http.StatusBadRequest)
 			return
 		}
 
-		log.Printf("Decoded address: %s", decodedAddress)
+		logger.Debug(requestID, "Decoded address: %s", decodedAddress)
 		worker, found := reg.GetWorker(decodedAddress)
 		if !found {
 			http.NotFound(w, r)
@@ -48,7 +60,11 @@ func StartServer(reg *registry.Registry, router *mux.Router, ready chan struct{}
 	}).Methods("GET")
 
 	router.HandleFunc("/workers/healthy", func(w http.ResponseWriter, r *http.Request) {
-		log.Println("Received request for healthy workers")
+		requestID := middleware.GetRequestIDFromContext(r.Context())
+		logger := middleware.GetLogger()
+		logger.Debug(requestID, "Handling /workers/healthy request")
+
+		logger.Debug(requestID, "Received request for healthy workers")
 		workers := reg.GetHealthyWorkers()
 		addresses := make([]string, 0, len(workers))
 		for _, worker := range workers {

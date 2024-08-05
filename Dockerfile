@@ -8,6 +8,7 @@ WORKDIR /app
 # Adjust these to match the target architecture, e.g., 'linux/arm64' or 'linux/amd64'
 ENV GOOS=linux
 ENV GOARCH=amd64
+ENV CGO_ENABLED=0
 
 # Copy the go.mod and go.sum to leverage Docker cache
 COPY go.* ./
@@ -27,7 +28,10 @@ WORKDIR /root/
 
 # Copy the binary and config file from the builder stage to the production image
 COPY --from=builder /app/registry-service .
-COPY --from=builder /app/internal/config/config.json .
+COPY --from=builder /app/internal/config/config.json ./internal/config/config.json
+
+# Expose the port the app runs on
+EXPOSE 8080
 
 # Run the web service on container startup.
 CMD ["./registry-service"]
