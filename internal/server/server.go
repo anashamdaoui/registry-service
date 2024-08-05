@@ -30,7 +30,9 @@ func StartServer(reg *registry.Registry, router *mux.Router, ready chan struct{}
 		logger.Debug(requestID, "Received register request for address: %s", address)
 		reg.RegisterWorker(address)
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("Worker registered"))
+		if _, err := w.Write([]byte("Worker registered")); err != nil {
+			logger.Debug(requestID, "Error writing response: %v", err)
+		}
 	}).Methods("GET")
 
 	router.HandleFunc("/worker/health/{address}", func(w http.ResponseWriter, r *http.Request) {
@@ -56,7 +58,9 @@ func StartServer(reg *registry.Registry, router *mux.Router, ready chan struct{}
 			http.NotFound(w, r)
 			return
 		}
-		json.NewEncoder(w).Encode(worker)
+		if err := json.NewEncoder(w).Encode(worker); err != nil {
+			logger.Debug(requestID, "Error encoding response: %v", err)
+		}
 	}).Methods("GET")
 
 	router.HandleFunc("/workers/healthy", func(w http.ResponseWriter, r *http.Request) {
@@ -70,7 +74,9 @@ func StartServer(reg *registry.Registry, router *mux.Router, ready chan struct{}
 		for _, worker := range workers {
 			addresses = append(addresses, worker.Address)
 		}
-		json.NewEncoder(w).Encode(addresses)
+		if err := json.NewEncoder(w).Encode(addresses); err != nil {
+			logger.Debug(requestID, "Error encoding response: %v", err)
+		}
 	}).Methods("GET")
 
 	srv := &http.Server{
