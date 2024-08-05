@@ -14,9 +14,11 @@ build:
 	@echo "Building the project..."
 	go build -o bin/registry-service cmd/main.go
 
-test:
+test-unit:
 	@echo "Running unit tests..."
 	go test -v ./test/unit
+
+test-integration:
 	@echo "Running integration tests..."
 	go test -v ./test/integration
 
