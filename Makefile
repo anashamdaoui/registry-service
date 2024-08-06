@@ -12,6 +12,7 @@ all: build test
 
 build:
 	@echo "Building the project..."
+	if [ ! -f $(CONFIG_FILE) ]; then echo "Config file missing"; exit 1; fi
 	go build -o bin/registry-service cmd/main.go
 
 test-unit:
@@ -29,9 +30,8 @@ clean:
 docker-build: build
 	docker build -t $(DOCKER_IMAGE_NAME) .
 
-docker-run: 
-	docker run -p $(SERVER_PORT):8080 --name $(DOCKER_CONTAINER_NAME) $(DOCKER_IMAGE_NAME)
+docker-run:
+	docker run -p 9080:$(SERVER_PORT) --name $(DOCKER_CONTAINER_NAME) -v /etc/localtime:/etc/localtime:ro -v /etc/timezone:/etc/timezone:ro $(DOCKER_IMAGE_NAME)
 
 run: build
-	if [ ! -f $(CONFIG_FILE) ]; then echo "Config file missing"; exit 1; fi
 	./bin/registry-service

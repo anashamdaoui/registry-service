@@ -30,7 +30,7 @@ WORKDIR /root/
 COPY --from=builder /app/registry-service .
 COPY --from=builder /app/internal/config/config.json ./internal/config/config.json
 
-# Expose the port the app runs on
+# Expose the port the app runs on. Must match the server_port defined in config.json
 EXPOSE 8080
 
 # Run the web service on container startup.
