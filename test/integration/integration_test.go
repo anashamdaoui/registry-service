@@ -53,8 +53,14 @@ func TestRegisterEndpoint(t *testing.T) {
 
 	address := "http://worker1:8080"
 	url := "http://localhost:8081/register?address=" + address
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	req.Header.Set("X-API-Key", config.AppConfig.APIKey)
+
 	log.Printf("Sending register request to URL: %s", url)
-	resp, err := http.Get(url)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("Failed to send register request: %v", err)
 	}
@@ -135,7 +141,13 @@ func TestHealthyWorkersEndpoint(t *testing.T) {
 
 	url := "/workers/healthy"
 	log.Printf("Sending request to URL: %s", url)
-	req := httptest.NewRequest("GET", url, nil)
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	req.Header.Set("X-API-Key", config.AppConfig.APIKey)
+
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -147,8 +159,7 @@ func TestHealthyWorkersEndpoint(t *testing.T) {
 	}
 
 	var addresses []string
-	err := json.NewDecoder(w.Body).Decode(&addresses)
-	if err != nil {
+	if err := json.NewDecoder(w.Body).Decode(&addresses); err != nil {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
 

@@ -17,11 +17,13 @@ The configuration for the registry service is defined in a `config.json` file. H
 ```json
 {
   "log_level": "DEBUG",
-  "port": "8080"
+  "server_port": "8080",
+  "api_key": "your_api_key_here"
 }
 ```
 - log_level: Defines the verbosity of logs. Set to "DEBUG" for detailed logging.
-- port: The port on which the registry service will run.
+- server_port: The port on which the registry service will run.
+- api_key: Defines the API token to be added in the Authorization header when communicating with the service through the API.
 
 ### Endpoints
 
@@ -54,11 +56,15 @@ make clean
 ```
 
 ### Using Docker
+The Dockerfile is defined to expose the registry on a specific port.
+The port exposed in the Docker is the same the registry server listens to.
+
 1. Build the Docker image:
 ```bash
-docker build -t registry-service .
+make docker-build
 ```
+
 2. Run the Docker container
 ```bash
-docker run -p 8080:8080 registry-service
+make docker-run
 ```
