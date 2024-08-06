@@ -16,6 +16,7 @@ func StartServer(reg *registry.Registry, router *mux.Router, ready chan struct{}
 
 	router.Use(middleware.RequestID)        // Add Request ID middleware
 	router.Use(middleware.LoggerMiddleware) // Add Logger middleware
+	router.Use(middleware.AuthMiddleware)   // Add Auth middleware
 
 	router.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
 		requestID := middleware.GetRequestIDFromContext(r.Context())
