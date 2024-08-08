@@ -1,0 +1,1 @@
+{"go-coverage-action-fmt":1,"coverage_pct":69.74358974358974,"pkg_stats":{"registry-service/internal/registry":[91.76470588235294],"registry-service/internal/middleware":[68.75],"registry-service/cmd":[0],"registry-service/internal/config":[66.66666666666666],"registry-service/internal/server":[56.60377358490566]},"skipped_count":0}
