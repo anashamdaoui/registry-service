@@ -16,12 +16,26 @@ build:
 	go build -o bin/registry-service cmd/main.go
 
 test-unit:
+	@echo Deploying a MongoDB Docker
+	docker pull mongo
+	docker run --name test-mongo -p 27017:27017 -d mongo
+	docker ps | grep test-mongo
 	@echo "Running unit tests..."
 	go test -v ./test/unit
+	@echo shutting down MongoDB Docker
+	docker stop test-mongo
+	docker rm test-mongo
 
 test-integration:
+	@echo Deploying a MongoDB Docker
+	docker pull mongo
+	docker run --name test-mongo -p 27017:27017 -d mongo
+	docker ps | grep test-mongo
 	@echo "Running integration tests..."
 	go test -v ./test/integration
+	@echo shutting down MongoDB Docker
+	docker stop test-mongo
+	docker rm test-mongo
 
 clean:
 	@echo "Cleaning up..."

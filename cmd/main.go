@@ -5,10 +5,12 @@ import (
 	"os"
 	"os/signal"
 	"registry-service/internal/config"
+	"registry-service/internal/database"
 	"registry-service/internal/middleware"
 	"registry-service/internal/registry"
 	"registry-service/internal/server"
 	"syscall"
+	"time"
 
 	"github.com/gorilla/mux"
 )
@@ -22,8 +24,25 @@ func main() {
 	// Initialize the logger with the configured log level
 	middleware.InitLogger(config.AppConfig.LogLevel)
 
+	// Connect to the MongoDB database
+	db, err := database.NewMongoDB(config.AppConfig.DB.URI, config.AppConfig.DB.Name, config.AppConfig.DB.Collection)
+	if err != nil {
+		log.Fatalf("Failed to connect to MongoDB: %v", err)
+	}
+	defer func() {
+		if err := db.Disconnect(); err != nil {
+			log.Fatalf("Error disconnecting from database: %v", err)
+		}
+	}() // Ensure the database connection is closed
+
+	// Ensure indexes are created
+	if err := db.CreateIndexes(); err != nil {
+		log.Fatalf("Failed to create indexes: %v", err)
+	}
+
 	// Create a new registry
-	reg := registry.NewRegistry()
+	checkInterval := time.Millisecond * time.Duration(config.AppConfig.CheckIntervalMs)
+	reg := registry.NewRegistry(db, checkInterval)
 
 	// Create a new router
 	router := mux.NewRouter()
@@ -32,7 +51,7 @@ func main() {
 	ready := make(chan struct{})
 
 	// Start the server in a separate goroutine
-	srv := server.StartServer(reg, router, ready, config.AppConfig.Port)
+	srv := server.StartServer(reg, router, ready, config.AppConfig.ServerPort)
 
 	// Wait for the server to signal readiness
 	<-ready
@@ -45,8 +64,11 @@ func main() {
 	<-sigs
 	log.Println("Shutting down registry service...")
 
+	// Stop the health check loop
+	reg.StopHealthCheck()
+
 	if err := srv.Close(); err != nil {
-		log.Fatalf("Server Shutdown Failed:%+v", err)
+		log.Fatalf("Server Shutdown Failed: %+v", err)
 	}
 	log.Println("Server exited properly")
 }
