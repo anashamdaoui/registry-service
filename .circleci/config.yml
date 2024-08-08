@@ -4,15 +4,13 @@ jobs:
   build-and-test:
     machine: # executor type
       image: ubuntu-2004:202010-01 # # recommended linux image - includes Ubuntu 20.04, docker 19.03.13, docker-compose 1.27.4
-      # install golang 1.22
-      wget -c https://go.dev/dl/go1.22.5.linux-amd64.tar.gz
-      sudo tar -C /usr/local/ -xzf go1.22.5.linux-amd64.tar.gz
-      export PATH=$PATH:/usr/local/go/bin
-      export GOPATH=$HOME/.local/go
-
+      
     working_directory: /home/circleci/project
 
     steps:
+      - run:
+          name: install go 1.22
+          command: wget -c https://go.dev/dl/go1.22.5.linux-amd64.tar.gz && sudo tar -C /usr/local/ -xzf go1.22.5.linux-amd64.tar.gz && export PATH=$PATH:/usr/local/go/bin && export GOPATH=$HOME/.local/go 
       - checkout
 
       - run:
