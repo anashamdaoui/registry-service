@@ -2,11 +2,10 @@ package integration
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"registry-service/internal/config"
+	"registry-service/internal/database"
 	"registry-service/internal/middleware"
 	"registry-service/internal/registry"
 	"registry-service/internal/server"
@@ -14,157 +13,172 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/stretchr/testify/assert"
 )
 
-// Initialize the logger for tests
-func initTestLogger() {
+// Test Setup:
+// - setupIntegrationDB is used to initialize a clean database state before each test, ensuring that each test runs independently.
+// - The init function ensures that configuration settings are loaded from the config.json file before tests are executed.
+func init() {
+	// Load the configuration from the config file
 	config.LoadConfig("config.json")
+	// Initialize the logger
 	middleware.InitLogger(config.AppConfig.LogLevel)
 }
 
-func setupServer(port string) (*registry.Registry, *mux.Router, *http.Server) {
-	initTestLogger() // Initialize the logger
-	reg := registry.NewRegistry()
+// setupIntegrationDB initializes a clean database state for integration tests.
+func setupIntegrationDB(t *testing.T) *database.MongoDB {
+	// Connect to the MongoDB instance
+	db, err := database.NewMongoDB(config.AppConfig.DB.URI, config.AppConfig.DB.Name, config.AppConfig.DB.Collection)
+	assert.NoError(t, err, "Failed to connect to test database")
+
+	// Clear the existing collection to start fresh
+	err = db.ClearCollection()
+	assert.NoError(t, err, "Failed to clean up test database")
+
+	return db
+}
+
+// setupTestServer starts a test HTTP server for the registry service.
+func setupTestServer(db *database.MongoDB) (*httptest.Server, *registry.Registry) {
+	checkInterval := time.Duration(config.AppConfig.CheckIntervalMs) * time.Millisecond
+	reg := registry.NewRegistry(db, checkInterval)
+
 	router := mux.NewRouter()
-	ready := make(chan struct{})
+	server.StartServer(reg, router, make(chan struct{}), "")
 
-	srv := server.StartServer(reg, router, ready, port)
-
-	// Wait for the server to signal readiness
-	<-ready
-	log.Println("Server is ready.")
-	time.Sleep(1 * time.Second) // Give the server a moment to be ready
-	return reg, router, srv
+	return httptest.NewServer(router), reg
 }
 
-func cleanupWorkersFile() {
-	if err := os.Remove("workers.json"); err != nil && !os.IsNotExist(err) {
-		log.Printf("Failed to remove workers.json: %v", err)
-	} else {
-		log.Println("workers.json file removed successfully.")
-	}
-}
+// TestIntegrationRegisterWorker tests the registration of a worker through the HTTP API.
+func TestIntegrationRegisterWorker(t *testing.T) {
+	db := setupIntegrationDB(t)
+	defer db.Disconnect()
 
-func TestRegisterEndpoint(t *testing.T) {
-	defer cleanupWorkersFile()
-	log.Println("Setting up server for TestRegisterEndpoint...")
-	reg, _, srv := setupServer("8081")
-	defer srv.Close()
+	ts, _ := setupTestServer(db)
+	defer ts.Close()
 
 	address := "http://worker1:8080"
-	url := "http://localhost:8081/register?address=" + address
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		t.Fatalf("Failed to create request: %v", err)
-	}
+	req, err := http.NewRequest("GET", ts.URL+"/register?address="+address, nil)
+	assert.NoError(t, err)
+
+	// Include API Key in the request header
 	req.Header.Set("X-API-Key", config.AppConfig.APIKey)
 
-	log.Printf("Sending register request to URL: %s", url)
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("Failed to send register request: %v", err)
-	}
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("Expected status 200 OK, got %d", resp.StatusCode)
-	}
-
-	log.Println("Checking if the worker was registered correctly...")
-	worker, exists := reg.GetWorker(address)
-	if !exists {
-		t.Fatalf("Expected worker to be registered")
-	}
-
-	if worker.Address != address {
-		t.Errorf("Expected address %s, got %s", address, worker.Address)
-	}
-	log.Println("TestRegisterEndpoint completed successfully.")
+	// Verify worker is registered in the database
+	workers, err := db.GetAllWorkers()
+	assert.NoError(t, err)
+	assert.Len(t, workers, 1)
+	assert.Equal(t, address, workers[0]["address"])
 }
 
-func TestHealthEndpoint(t *testing.T) {
-	defer cleanupWorkersFile()
-	log.Println("Setting up server for TestHealthEndpoint...")
-	reg, _, srv := setupServer("8082")
-	defer srv.Close()
+// TestIntegrationGetWorkerHealth tests retrieving the health status of a worker.
+func TestIntegrationGetWorkerHealth(t *testing.T) {
+	db := setupIntegrationDB(t)
+	defer db.Disconnect()
 
-	// Start a mock HTTP server to simulate the worker
+	ts, reg := setupTestServer(db)
+	defer ts.Close()
+
+	address := "http://worker2:8080"
+	_ = db.InsertWorker(address)
+	reg.RegisterWorker(address) // register the server in the registry cache
+
+	req, err := http.NewRequest("GET", ts.URL+"/worker/health?address="+address, nil)
+	assert.NoError(t, err)
+
+	// Include API Key in the request header
+	req.Header.Set("X-API-Key", config.AppConfig.APIKey)
+
+	resp, err := http.DefaultClient.Do(req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var worker registry.Worker
+	err = json.NewDecoder(resp.Body).Decode(&worker)
+	assert.NoError(t, err)
+	assert.Equal(t, address, worker.Address)
+}
+
+// TestIntegrationGetHealthyWorkers tests retrieving all healthy workers.
+func TestIntegrationGetHealthyWorkers(t *testing.T) {
+	db := setupIntegrationDB(t)
+	defer db.Disconnect()
+
+	ts, reg := setupTestServer(db)
+	defer ts.Close()
+
+	address1 := "http://worker3.1:8080"
+	_ = db.InsertWorker(address1)
+	reg.RegisterWorker(address1) // register the server in the registry cache
+
+	address2 := "http://worker3.2:8080"
+	_ = db.InsertWorker(address2)
+	reg.RegisterWorker(address2) // register the server in the registry cache
+
+	// Fake out a worker healthcheck failure
+	db.UpdateWorkerHealth(address2, false)
+	reg.UpdateHealth(address2, false)
+
+	req, err := http.NewRequest("GET", ts.URL+"/workers/healthy", nil)
+	assert.NoError(t, err)
+
+	// Include API Key in the request header
+	req.Header.Set("X-API-Key", config.AppConfig.APIKey)
+
+	resp, err := http.DefaultClient.Do(req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var addresses []string
+	err = json.NewDecoder(resp.Body).Decode(&addresses)
+	assert.NoError(t, err)
+	assert.Len(t, addresses, 1) // Only one worker should be healthy
+	assert.Equal(t, address1, addresses[0])
+}
+
+// TestIntegrationHealthCheckLoop verifies that the health check loop updates worker health.
+func TestIntegrationHealthCheckLoop(t *testing.T) {
+	db := setupIntegrationDB(t)
+	defer db.Disconnect()
+
+	ts, reg := setupTestServer(db)
+	defer ts.Close()
+
+	// Start a mock server to simulate the worker
 	mockWorker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("Mock worker received request for: %s", r.URL.Path)
 		if r.URL.Path == "/healthcheck" {
-			log.Println("Mock worker responding with 200 OK")
 			w.WriteHeader(http.StatusOK)
-			if _, err := w.Write([]byte("OK")); err != nil {
-				log.Printf("Failed to write response: %v", err)
-			}
+			w.Write([]byte("OK"))
 		} else {
-			log.Println("Mock worker responding with 404 Not Found")
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 	defer mockWorker.Close()
 
 	address := mockWorker.URL
-	log.Printf("Registering worker with address: %s", address)
-	reg.RegisterWorker(address)
+	reg.RegisterWorker(address) // register the server in the registry cache
 
-	// Call CheckAllWorkers to update the health status of the worker
-	reg.CheckAllWorkers()
+	// Wait for the health check loop to run
+	time.Sleep(2 * time.Second)
 
-	// Verify the worker's health status
-	worker, exists := reg.GetWorker(address)
-	if !exists {
-		t.Fatalf("Expected worker to be found")
-	}
-	if !worker.IsHealthy {
-		t.Fatalf("Expected worker to be healthy, got unhealthy")
-	}
-	if worker.Address != address {
-		t.Fatalf("Expected worker address to be %s, got %s", address, worker.Address)
-	}
+	// Verify the worker is marked as healthy
+	req, err := http.NewRequest("GET", ts.URL+"/worker/health?address="+address, nil)
+	assert.NoError(t, err)
 
-	log.Println("TestHealthEndpoint completed successfully.")
-}
-
-func TestHealthyWorkersEndpoint(t *testing.T) {
-	defer cleanupWorkersFile()
-	log.Println("Setting up server for TestHealthyWorkersEndpoint...")
-	reg, router, srv := setupServer("8083")
-	defer srv.Close()
-
-	address1 := "http://worker1:8080"
-	address2 := "http://worker2:8080"
-
-	log.Printf("Registering workers with addresses: %s and %s", address1, address2)
-	reg.RegisterWorker(address1)
-	reg.RegisterWorker(address2)
-	reg.UpdateHealth(address2, false)
-
-	url := "/workers/healthy"
-	log.Printf("Sending request to URL: %s", url)
-
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		t.Fatalf("Failed to create request: %v", err)
-	}
+	// Include API Key in the request header
 	req.Header.Set("X-API-Key", config.AppConfig.APIKey)
 
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	resp, err := http.DefaultClient.Do(req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-	log.Printf("Received response: %v", w.Code)
-	log.Printf("Response body: %v", w.Body.String())
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("Expected status 200 OK, got %d", w.Code)
-	}
-
-	var addresses []string
-	if err := json.NewDecoder(w.Body).Decode(&addresses); err != nil {
-		t.Fatalf("Failed to decode response: %v", err)
-	}
-
-	if len(addresses) != 1 || addresses[0] != address1 {
-		t.Errorf("Expected healthy worker address %s, got %v", address1, addresses)
-	}
-	log.Println("TestHealthyWorkersEndpoint completed successfully.")
+	var worker registry.Worker
+	err = json.NewDecoder(resp.Body).Decode(&worker)
+	assert.NoError(t, err)
+	assert.True(t, worker.IsHealthy, "Worker should be healthy after health check loop")
 }
