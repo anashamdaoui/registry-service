@@ -1,10 +1,11 @@
-// internal/database/database.go
-
 package database
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/url"
+	"regexp"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -84,6 +85,12 @@ func (db *MongoDB) CreateIndexes() error {
 func (db *MongoDB) InsertWorker(address string) error {
 	logger := middleware.GetLogger()
 
+	// Validate address
+	if !isValidAddress(address) {
+		logger.Info("DB - ", "Invalid worker address: %s", address)
+		return errors.New("invalid worker address")
+	}
+
 	logger.Debug("DB - ", "Inserting new worker with address: %s", address)
 
 	worker := bson.M{
@@ -103,6 +110,12 @@ func (db *MongoDB) InsertWorker(address string) error {
 // UpdateWorkerHealth updates the health status of a worker
 func (db *MongoDB) UpdateWorkerHealth(address string, isHealthy bool) error {
 	logger := middleware.GetLogger()
+
+	// Validate address
+	if !isValidAddress(address) {
+		logger.Info("DB - ", "Invalid worker address: %s", address)
+		return errors.New("invalid worker address")
+	}
 
 	logger.Debug("DB - ", "Updating health for worker with address: %s", address)
 
@@ -159,11 +172,53 @@ func (db *MongoDB) ClearCollection() error {
 // DeleteWorker removes a worker from the MongoDB collection
 func (db *MongoDB) DeleteWorker(address string) error {
 	logger := middleware.GetLogger()
+
+	// Validate address
+	if !isValidAddress(address) {
+		logger.Info("DB - ", "Invalid worker address: %s", address)
+		return errors.New("invalid worker address")
+	}
+
 	logger.Debug("DB - ", "Removing worker with address %v", address)
 	filter := bson.M{"address": address}
 	_, err := db.collection.DeleteOne(context.TODO(), filter)
 	if err != nil {
 		logger.Info("DB - ", "Failed to delete worker from database: %v", err)
+	} else {
+		logger.Debug("DB - ", "Worker with address %v deleted successfully.", address)
 	}
 	return err
+}
+
+// isValidAddress checks if the address string is valid
+/*
+1. URL Parsing: The net/url package is used to parse the address string. This helps ensure that the string is a properly formatted URL and can detect obvious structural errors.
+2. Scheme Validation: After parsing, we check that the scheme is either http or https. This prevents other schemes (e.g., file, ftp, etc.) from being accepted.
+3. Host Validation: We ensure that the host part of the URL is not empty, preventing URLs that don't point to a valid domain.
+4. Regular Expression: The regex pattern is used to match common URL components while filtering out potentially malicious or malformed data. The pattern matches:
+- The scheme (either http or https).
+- A valid URL path and query string, allowing for most typical characters found in URLs.
+*/
+func isValidAddress(address string) bool {
+	// Check if the address can be parsed as a URL
+	parsedURL, err := url.Parse(address)
+	if err != nil {
+		return false
+	}
+
+	// Ensure the scheme is either http or https
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		return false
+	}
+
+	// Check that the host is not empty
+	if parsedURL.Host == "" {
+		return false
+	}
+
+	// Check for invalid characters using a regular expression
+	// This regex checks for a simple URL pattern: scheme://host/path
+	// Adjust the pattern according to your specific security requirements
+	var urlRegex = regexp.MustCompile(`^(http|https):\/\/[a-zA-Z0-9-._~:\/?#\[\]@!$&'()*+,;=%]+$`)
+	return urlRegex.MatchString(address)
 }
