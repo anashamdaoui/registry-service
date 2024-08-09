@@ -31,11 +31,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        
-      - name: Docker Setup QEMU
-      # You may pin to the exact commit or the version.
-      # uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf
-        uses: docker/setup-qemu-action@v3.2.0
 
       # Set up BuildKit Docker container builder to be able to build
       # multi-platform images and export cache
