@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"registry-service/internal/database"
 	"registry-service/internal/middleware"
+	"registry-service/internal/observability"
 	"sync"
 	"time"
 
@@ -47,6 +48,9 @@ func (r *Registry) loadWorkersFromDB() {
 			IsHealthy:       isHealthy,
 			LastHealthCheck: lastHealthCheck,
 		}
+
+		// Record the health status in Prometheus metrics
+		observability.RecordWorkerHealth(address, isHealthy)
 	}
 }
 
@@ -75,6 +79,9 @@ func (r *Registry) RegisterWorker(address string) {
 			logger.Info("", "Failed to update worker in database: %v", err)
 		}
 	}
+
+	// Record the health status in Prometheus metrics
+	observability.RecordWorkerHealth(address, true)
 }
 
 // UpdateHealth updates the health status of a worker
@@ -95,6 +102,9 @@ func (r *Registry) UpdateHealth(address string, isHealthy bool) {
 		if err := r.db.UpdateWorkerHealth(address, isHealthy); err != nil {
 			logger.Info("Cache - ", "Failed to update worker in database: %v", err)
 		}
+
+		// Record the health status in Prometheus metrics
+		observability.RecordWorkerHealth(address, isHealthy)
 	}
 }
 

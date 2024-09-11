@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"registry-service/internal/middleware"
+	"registry-service/internal/observability"
 	"registry-service/internal/registry"
 
 	"github.com/gorilla/mux"
@@ -13,9 +14,10 @@ import (
 // StartServer starts the HTTP server for the registry service and returns the server instance.
 func StartServer(reg *registry.Registry, router *mux.Router, ready chan struct{}, port string) *http.Server {
 
-	router.Use(middleware.RequestID)        // Add Request ID middleware
-	router.Use(middleware.LoggerMiddleware) // Add Logger middleware
-	router.Use(middleware.AuthMiddleware)   // Add Auth middleware
+	router.Use(middleware.RequestID)            // Add Request ID middleware
+	router.Use(middleware.LoggerMiddleware)     // Add Logger middleware
+	router.Use(middleware.AuthMiddleware)       // Add Auth middleware
+	router.Use(observability.MetricsMiddleware) // Add Metrics middleware
 
 	router.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
 		requestID := middleware.GetRequestIDFromContext(r.Context())
@@ -85,5 +87,9 @@ func StartServer(reg *registry.Registry, router *mux.Router, ready chan struct{}
 			log.Fatalf("HTTP server stopped: %v", err)
 		}
 	}()
+
+	// Start a separate HTTP server for Prometheus metrics
+	go observability.ServeMetrics(":9090")
+
 	return srv
 }
