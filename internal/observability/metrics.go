@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"registry-service/internal/middleware"
+	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -42,7 +43,6 @@ func init() {
 	prometheus.MustRegister(httpRequestsTotal)
 	prometheus.MustRegister(httpRequestDuration)
 	prometheus.MustRegister(workerHealthStatus)
-	middleware.GetLogger().Debug("", "Metrics - Registered")
 }
 
 // MetricsMiddleware is a middleware to collect metrics for each HTTP request
@@ -82,13 +82,17 @@ func RecordWorkerHealth(address string, isHealthy bool) {
 	workerHealthStatus.WithLabelValues(address).Set(value)
 }
 
+var metricsOnce sync.Once
+
 // ServeMetrics starts an HTTP server that exposes the Prometheus metrics endpoint
 func ServeMetrics(addr string) {
-	http.Handle("/metrics", promhttp.Handler()) // Expose the /metrics endpoint for Prometheus
-	middleware.GetLogger().Info("", "Starting registry metrics server on %s\n", addr)
+	metricsOnce.Do(func() {
+		http.Handle("/metrics", promhttp.Handler()) // Expose the /metrics endpoint for Prometheus
+		middleware.GetLogger().Info("", "Starting registry metrics server on %s\n", addr)
 
-	// Start the HTTP server to expose metrics
-	if err := http.ListenAndServe(addr, nil); err != nil {
-		log.Fatalf("Error starting metrics server: %v", err)
-	}
+		// Start the HTTP server to expose metrics
+		if err := http.ListenAndServe(addr, nil); err != nil {
+			log.Fatalf("Error starting metrics server: %v", err)
+		}
+	})
 }

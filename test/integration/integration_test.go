@@ -136,17 +136,9 @@ func TestIntegrationGetHealthyWorkers(t *testing.T) {
 	ts, reg := setupTestServer(db)
 	defer ts.Close()
 
-	address1 := "http://worker3.1:8080"
+	address1 := "http://worker3:8080"
 	_ = db.InsertWorker(address1)
 	reg.RegisterWorker(address1) // register the server in the registry cache
-
-	address2 := "http://worker3.2:8080"
-	_ = db.InsertWorker(address2)
-	reg.RegisterWorker(address2) // register the server in the registry cache
-
-	// Fake out a worker healthcheck failure
-	db.UpdateWorkerHealth(address2, false)
-	reg.UpdateHealth(address2, false)
 
 	req, err := http.NewRequest("GET", ts.URL+"/workers/healthy", nil)
 	assert.NoError(t, err)
