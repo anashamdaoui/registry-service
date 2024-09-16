@@ -1,6 +1,7 @@
 package observability
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"registry-service/internal/middleware"
@@ -57,7 +58,7 @@ func MetricsMiddleware(next http.Handler) http.Handler {
 		next.ServeHTTP(ww, r)
 
 		// Update Prometheus counters
-		httpRequestsTotal.WithLabelValues(r.Method, r.URL.Path, string(ww.status)).Inc()
+		httpRequestsTotal.WithLabelValues(r.Method, r.URL.Path, fmt.Sprint(ww.status)).Inc()
 	})
 }
 
