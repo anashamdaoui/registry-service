@@ -109,9 +109,8 @@ func TestGetWorker(t *testing.T) {
 	assert.Equal(t, address, worker.Address, "Worker address should match")
 }
 
-// TestGetHealthyWorkers:
-// Ensures only healthy workers are retrieved.
-func TestGetHealthyWorkers(t *testing.T) {
+// Ensures healthy workers are retrieved.
+func TestGetHealthyWorkersAddress(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Disconnect()
 
@@ -124,14 +123,12 @@ func TestGetHealthyWorkers(t *testing.T) {
 	reg.RegisterWorker(address1)
 	reg.RegisterWorker(address2)
 
-	// Mark address2 as unhealthy
-	reg.UpdateHealth(address2, false)
-
 	// Retrieve healthy workers
-	healthyWorkers := reg.GetHealthyWorkers()
+	addresses := reg.GetHealthyWorkersAddress()
 
-	assert.Len(t, healthyWorkers, 1, "There should be one healthy worker")
-	assert.Equal(t, address1, healthyWorkers[0].Address, "Healthy worker address should match")
+	assert.Len(t, addresses, 2, "There should be 2 healthy workers")
+	assert.Equal(t, address1, addresses[0], "Healthy worker address1 should match")
+	assert.Equal(t, address2, addresses[1], "Healthy worker address2 should match")
 }
 
 // TestLoadWorkersFromDB:

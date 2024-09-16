@@ -3,8 +3,10 @@ package registry
 import (
 	"log"
 	"net/http"
+	"registry-service/internal/config"
 	"registry-service/internal/database"
 	"registry-service/internal/middleware"
+	"registry-service/internal/observability"
 	"sync"
 	"time"
 
@@ -50,6 +52,28 @@ func (r *Registry) loadWorkersFromDB() {
 	}
 }
 
+// startHealthCheckLoop runs the health check loop at a configured interval.
+func (r *Registry) startHealthCheckLoop() {
+	logger := middleware.GetLogger()
+	ticker := time.NewTicker(r.checkInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			r.CheckAllWorkers()
+		case <-r.stopHealthCheck:
+			logger.Info("", "Stopping health check loop...")
+			return
+		}
+	}
+}
+
+// StopHealthCheck stops the health check loop.
+func (r *Registry) StopHealthCheck() {
+	close(r.stopHealthCheck)
+}
+
 // Register a new worker
 func (r *Registry) RegisterWorker(address string) {
 	r.mutex.Lock()
@@ -75,6 +99,9 @@ func (r *Registry) RegisterWorker(address string) {
 			logger.Info("", "Failed to update worker in database: %v", err)
 		}
 	}
+
+	// Record the health status in Prometheus metrics
+	observability.RecordWorkerHealth(address, true)
 }
 
 // UpdateHealth updates the health status of a worker
@@ -83,6 +110,7 @@ func (r *Registry) UpdateHealth(address string, isHealthy bool) {
 	defer r.mutex.Unlock()
 
 	logger := middleware.GetLogger()
+	logger.Debug("", "UpdateHealth worker address %s isHealthy %v", address, isHealthy)
 
 	worker, exists := r.workers[address]
 	if !exists {
@@ -95,7 +123,41 @@ func (r *Registry) UpdateHealth(address string, isHealthy bool) {
 		if err := r.db.UpdateWorkerHealth(address, isHealthy); err != nil {
 			logger.Info("Cache - ", "Failed to update worker in database: %v", err)
 		}
+
+		// Record the health status in Prometheus metrics
+		observability.RecordWorkerHealth(address, isHealthy)
 	}
+}
+
+func getWorkerHealth(url string, apiKey string) bool {
+	logger := middleware.GetLogger()
+
+	// Create a new GET request
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		logger.Debug("", "Failed to create request GET %s : %s", url, err)
+		return false
+	}
+
+	// Set the X-API-Key header
+	req.Header.Set("X-API-Key", apiKey)
+
+	// Send the request
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		logger.Debug("", "Failed to create request GET %s : %s", url, err)
+		return false
+	}
+	defer resp.Body.Close()
+
+	// Compute health result
+	isHealthy := resp.StatusCode == http.StatusOK
+
+	return isHealthy
 }
 
 // CheckAllWorkers checks the health of all workers in the cache.
@@ -106,34 +168,31 @@ func (r *Registry) CheckAllWorkers() {
 	workers := r.workers
 	r.mutex.Unlock()
 
+	isHealthy := false
 	for address := range workers {
-		resp, err := http.Get(address + "/healthcheck")
-		isHealthy := err == nil && resp.StatusCode == http.StatusOK
 
-		if err != nil || resp.StatusCode != http.StatusOK {
-			// Log the error and implement a retry mechanism
-			logger.Debug("", "Error checking health for worker %s: %v. Retrying...", address, err)
+		logger.Debug("", "Checking health of worker at address: %s", address)
 
-			// Retry logic
-			retries := 3
-			for i := 0; i < retries; i++ {
-				time.Sleep(100 * time.Millisecond) // Backoff
-				resp, err = http.Get(address + "/healthcheck")
-				isHealthy = err == nil && resp.StatusCode == http.StatusOK
-				if isHealthy {
-					break
+		retries := 4
+		for i := 0; i < retries; i++ {
+			isHealthy = getWorkerHealth(address+"/healthcheck", config.AppConfig.APIKey)
+			if isHealthy {
+				r.UpdateHealth(address, true)
+				logger.Debug("", "Worker %s is healthy", address)
+				break
+			} else {
+				// Log the error and retry
+				str := ""
+				if i < retries {
+					str = " Retrying..."
 				}
+				logger.Debug("", "Try #%d: Error checking worker (%s) health.%s", i, address, str)
 			}
+			time.Sleep(100 * time.Millisecond) // Backoff
 		}
 
-		r.UpdateHealth(address, isHealthy)
-		logger.Debug("", "Worker %s health check result: %v", address, isHealthy)
-
-		if isHealthy {
-			logger.Debug("", "Worker %s is healthy", address)
-			r.UpdateHealth(address, true)
-		} else {
-			logger.Info("", "Worker %s is not healthy after retries. Removing from cache and database.", address)
+		if !isHealthy {
+			logger.Info("", "Worker %s is not healthy after retries. Removing it from cache and database.", address)
 			r.RemoveWorker(address)
 		}
 	}
@@ -153,54 +212,36 @@ func (r *Registry) RemoveWorker(address string) {
 	}
 }
 
-// startHealthCheckLoop runs the health check loop at a configured interval.
-func (r *Registry) startHealthCheckLoop() {
-	logger := middleware.GetLogger()
-	ticker := time.NewTicker(r.checkInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			r.CheckAllWorkers()
-		case <-r.stopHealthCheck:
-			logger.Info("", "Stopping health check loop...")
-			return
-		}
-	}
-}
-
-// StopHealthCheck stops the health check loop.
-func (r *Registry) StopHealthCheck() {
-	close(r.stopHealthCheck)
-}
-
 // GetWorker retrieves a worker by its address.
 func (r *Registry) GetWorker(address string) (*Worker, bool) {
-	logger := middleware.GetLogger()
-
-	logger.Debug("Cache - ", "Starting GetWorker...")
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
+
+	logger := middleware.GetLogger()
+	logger.Debug("Cache - ", "Starting GetWorker...")
+
 	worker, exists := r.workers[address]
+
 	logger.Debug("Cache -", "Completed GetWorker.")
+
 	return worker, exists
 }
 
 // GetHealthyWorkers retrieves all healthy workers.
-func (r *Registry) GetHealthyWorkers() []*Worker {
-	logger := middleware.GetLogger()
-
-	logger.Debug("Cache - ", "Starting GetHealthyWorkers...")
+func (r *Registry) GetHealthyWorkersAddress() []string {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
-	var healthyWorkers []*Worker
-	for _, worker := range r.workers {
-		if worker.IsHealthy {
-			healthyWorkers = append(healthyWorkers, worker)
-		}
+	logger := middleware.GetLogger()
+	logger.Debug("Cache - ", "Starting GetHealthyWorkers...")
+
+	// By design only healthy workers are kept in the cache and the DB.
+	addresses := make([]string, 0, len(r.workers))
+	for addresse := range r.workers {
+		addresses = append(addresses, addresse)
 	}
+
 	logger.Debug("Cache - ", "Completed GetHealthyWorkers.")
-	return healthyWorkers
+
+	return addresses
 }

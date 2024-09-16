@@ -40,9 +40,28 @@ func LoadConfig(configFile string) {
 		log.Fatalf("Failed to decode config file: %v", err)
 	}
 
+	// Override with environment variables if available
+	overrideWithEnv()
+
 	// Set default values if not specified in the config file
 	if AppConfig.CheckIntervalMs == 0 {
 		AppConfig.CheckIntervalMs = 100
 	}
 	log.Println("", "Configuration loaded successfully.")
+}
+
+// overrideWithEnv checks for environment variables and overrides config values
+func overrideWithEnv() {
+	if uri := os.Getenv("MONGO_URI"); uri != "" {
+		AppConfig.DB.URI = uri
+	}
+	if port := os.Getenv("REGISTRY_SERVER_PORT"); port != "" {
+		AppConfig.ServerPort = port
+	}
+	if logLevel := os.Getenv("REGISTRYY_LOG_LEVEL"); logLevel != "" {
+		AppConfig.LogLevel = logLevel
+	}
+	if apiKey := os.Getenv("REGISTRY_API_KEY"); apiKey != "" {
+		AppConfig.APIKey = apiKey
+	}
 }

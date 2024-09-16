@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -50,6 +51,35 @@ func setupTestServer(db *database.MongoDB) (*httptest.Server, *registry.Registry
 	return httptest.NewServer(router), reg
 }
 
+// Send a POST /register to the registry server with worker port in the body
+func registerWorker(registryURL string, id string, port int, apiKey string) (*http.Response, error) {
+	workerData := map[string]interface{}{
+		"id":   id,
+		"port": port,
+	}
+
+	jsonData, _ := json.Marshal(workerData)
+
+	req, err := http.NewRequest("POST", registryURL+"/register", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, err
+	}
+
+	// Add the required headers
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-API-Key", apiKey)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	defer resp.Body.Close()
+
+	return resp, nil
+}
+
 // TestIntegrationRegisterWorker tests the registration of a worker through the HTTP API.
 func TestIntegrationRegisterWorker(t *testing.T) {
 	db := setupIntegrationDB(t)
@@ -58,14 +88,8 @@ func TestIntegrationRegisterWorker(t *testing.T) {
 	ts, _ := setupTestServer(db)
 	defer ts.Close()
 
-	address := "http://worker1:8080"
-	req, err := http.NewRequest("GET", ts.URL+"/register?address="+address, nil)
-	assert.NoError(t, err)
-
-	// Include API Key in the request header
-	req.Header.Set("X-API-Key", config.AppConfig.APIKey)
-
-	resp, err := http.DefaultClient.Do(req)
+	address := "http://127.0.0.1:1234"
+	resp, err := registerWorker(ts.URL, "1-2-3-4", 1234, config.AppConfig.APIKey)
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
@@ -84,7 +108,7 @@ func TestIntegrationGetWorkerHealth(t *testing.T) {
 	ts, reg := setupTestServer(db)
 	defer ts.Close()
 
-	address := "http://worker2:8080"
+	address := "http://worker.domain:1234"
 	_ = db.InsertWorker(address)
 	reg.RegisterWorker(address) // register the server in the registry cache
 
@@ -112,17 +136,9 @@ func TestIntegrationGetHealthyWorkers(t *testing.T) {
 	ts, reg := setupTestServer(db)
 	defer ts.Close()
 
-	address1 := "http://worker3.1:8080"
+	address1 := "http://worker3:8080"
 	_ = db.InsertWorker(address1)
 	reg.RegisterWorker(address1) // register the server in the registry cache
-
-	address2 := "http://worker3.2:8080"
-	_ = db.InsertWorker(address2)
-	reg.RegisterWorker(address2) // register the server in the registry cache
-
-	// Fake out a worker healthcheck failure
-	db.UpdateWorkerHealth(address2, false)
-	reg.UpdateHealth(address2, false)
 
 	req, err := http.NewRequest("GET", ts.URL+"/workers/healthy", nil)
 	assert.NoError(t, err)
