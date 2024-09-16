@@ -8,11 +8,10 @@ SERVER_PORT = $(shell jq -r '.server_port' $(CONFIG_FILE))
 
 .PHONY: all build test clean
 
-all: build test
+all: build test-unit test-integration
 
 build:
 	@echo "Building the project..."
-	if [ ! -f $(CONFIG_FILE) ]; then echo "Config file missing"; exit 1; fi
 	go build -o bin/registry-service cmd/main.go
 
 test-unit:

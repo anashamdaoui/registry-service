@@ -173,17 +173,11 @@ func (db *MongoDB) ClearCollection() error {
 func (db *MongoDB) DeleteWorker(address string) error {
 	logger := middleware.GetLogger()
 
-	// Validate address
-	if !isValidAddress(address) {
-		logger.Info("DB - ", "Invalid worker address: %s", address)
-		return errors.New("invalid worker address")
-	}
-
 	logger.Debug("DB - ", "Removing worker with address %v", address)
 	filter := bson.M{"address": address}
 	_, err := db.collection.DeleteOne(context.TODO(), filter)
 	if err != nil {
-		logger.Info("DB - ", "Failed to delete worker from database: %v", err)
+		logger.Debug("DB - ", "Failed to delete worker from database: %v", err)
 	} else {
 		logger.Debug("DB - ", "Worker with address %v deleted successfully.", address)
 	}
