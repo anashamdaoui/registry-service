@@ -1,16 +1,18 @@
-version: 2.1
+ulversion: 2.1
 
 jobs:
   build-and-test:
-    docker:
-      # Use the official CircleCI Go image
-      - image: cimg/go:1.22.5
-
+    machine: # executor type
+      image: default
+      
     working_directory: /home/circleci/project
 
     steps:
       - checkout
-
+      
+      - run:
+          name: install go 1.22
+          command: mkdir -p ~/tmp && cd ~/tmp && wget -c https://go.dev/dl/go1.22.5.linux-amd64.tar.gz && sudo tar -C /usr/local/ -xzf go1.22.5.linux-amd64.tar.gz && export PATH=$PATH:/usr/local/go/bin && export GOPATH=$HOME/.local/go && cd $PWD 
       - run:
           name: Install Dependencies
           command: go mod download
