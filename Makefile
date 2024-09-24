@@ -20,7 +20,7 @@ test-unit:
 	docker run --name test-mongo -p 27017:27017 -d mongo
 	docker ps | grep test-mongo
 	@echo "Running unit tests..."
-	go test -v ./test/unit
+	go test -v -covermode count -coverprofile ./test-unit.cov ./test/unit
 	@echo shutting down MongoDB Docker
 	docker stop test-mongo
 	docker rm test-mongo
@@ -31,7 +31,7 @@ test-integration:
 	docker run --name test-mongo -p 27017:27017 -d mongo
 	docker ps | grep test-mongo
 	@echo "Running integration tests..."
-	go test -v ./test/integration
+	go test -v -covermode count -coverprofile ./test-integration.cov ./test/integration
 	@echo shutting down MongoDB Docker
 	docker stop test-mongo
 	docker rm test-mongo
