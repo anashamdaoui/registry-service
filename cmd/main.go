@@ -61,6 +61,7 @@ func main() {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
+	// Wait for os to signal termination
 	<-sigs
 	log.Println("Shutting down registry service...")
 

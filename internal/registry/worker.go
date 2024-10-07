@@ -3,7 +3,9 @@ package registry
 import "time"
 
 type Worker struct {
-	Address         string
+	Host            string
+	HTTPPort        int32
+	GRPCPort        int32
 	IsHealthy       bool
 	LastHealthCheck time.Time
 }

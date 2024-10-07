@@ -50,19 +50,18 @@ func TestRegisterWorker(t *testing.T) {
 	checkInterval := time.Duration(config.AppConfig.CheckIntervalMs) * time.Millisecond
 	reg := registry.NewRegistry(db, checkInterval)
 
-	address := "http://worker1:8080"
-	reg.RegisterWorker(address)
+	ip := "172.3.4.5"
+	reg.RegisterWorker("ID12342", ip, 8080, 5050)
 
 	// Assert that the worker is registered in memory
-	worker, exists := reg.GetWorker(address)
+	_, exists := reg.GetWorkerHealth(ip + ":8080")
 	assert.True(t, exists, "Worker should exist in registry")
-	assert.Equal(t, address, worker.Address, "Worker address should match")
 
 	// Assert that the worker is registered in the database
 	dbWorkers, err := db.GetAllWorkers()
 	assert.NoError(t, err, "Error retrieving workers from database")
 	assert.Len(t, dbWorkers, 1, "There should be one worker in the database")
-	assert.Equal(t, address, dbWorkers[0]["address"], "Worker address in DB should match")
+	assert.Equal(t, ip, dbWorkers[0]["host"], "Worker address in DB should match")
 }
 
 // TestUpdateHealth:
@@ -74,16 +73,15 @@ func TestUpdateHealth(t *testing.T) {
 	checkInterval := time.Duration(config.AppConfig.CheckIntervalMs) * time.Millisecond
 	reg := registry.NewRegistry(db, checkInterval)
 
-	address := "http://worker1:8080"
-	reg.RegisterWorker(address)
+	ip := "192.178.3.4"
+	reg.RegisterWorker("ID1234", ip, 3003, 4500)
 
 	// Update health status to false
-	reg.UpdateHealth(address, false)
+	reg.UpdateHealth("ID1234", false)
 
 	// Assert that the worker's health status is updated in memory
-	worker, exists := reg.GetWorker(address)
+	_, exists := reg.GetWorkerHealth(ip + ":3003")
 	assert.True(t, exists, "Worker should exist in registry")
-	assert.False(t, worker.IsHealthy, "Worker should be unhealthy")
 
 	// Assert that the worker's health status is updated in the database
 	dbWorkers, err := db.GetAllWorkers()
@@ -100,13 +98,12 @@ func TestGetWorker(t *testing.T) {
 	checkInterval := time.Duration(config.AppConfig.CheckIntervalMs) * time.Millisecond
 	reg := registry.NewRegistry(db, checkInterval)
 
-	address := "http://worker1:8080"
-	reg.RegisterWorker(address)
+	ip := "178.36.90.66"
+	reg.RegisterWorker("ID1234", ip, 3000, 556754)
 
 	// Retrieve the worker using the registry
-	worker, exists := reg.GetWorker(address)
+	_, exists := reg.GetWorkerHealth(ip + ":3000")
 	assert.True(t, exists, "Worker should exist in registry")
-	assert.Equal(t, address, worker.Address, "Worker address should match")
 }
 
 // Ensures healthy workers are retrieved.
@@ -117,18 +114,18 @@ func TestGetHealthyWorkersAddress(t *testing.T) {
 	checkInterval := time.Duration(config.AppConfig.CheckIntervalMs) * time.Millisecond
 	reg := registry.NewRegistry(db, checkInterval)
 
-	address1 := "http://worker1:8080"
-	address2 := "http://worker2:8080"
+	address1 := "198.36.3.4"
+	address2 := "1.2.3.4"
 
-	reg.RegisterWorker(address1)
-	reg.RegisterWorker(address2)
+	reg.RegisterWorker("ID1", address1, 8080, 6767)
+	reg.RegisterWorker("ID2", address2, 6787, 773753)
 
 	// Retrieve healthy workers
-	addresses := reg.GetHealthyWorkersAddress()
+	urls := reg.GetHealthyWorkersURL()
 
-	assert.Len(t, addresses, 2, "There should be 2 healthy workers")
-	assert.Equal(t, address1, addresses[0], "Healthy worker address1 should match")
-	assert.Equal(t, address2, addresses[1], "Healthy worker address2 should match")
+	assert.Len(t, urls, 2, "There should be 2 healthy workers")
+	assert.Equal(t, address1+":8080", urls[0], "Healthy worker address1 should match")
+	assert.Equal(t, address2+":6787", urls[1], "Healthy worker address2 should match")
 }
 
 // TestLoadWorkersFromDB:
@@ -137,8 +134,9 @@ func TestLoadWorkersFromDB(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Disconnect()
 
-	address := "http://worker1:8080"
-	if err := db.InsertWorker(address); err != nil {
+	ip := "187.3.4.5"
+	id := "ID1234"
+	if err := db.InsertWorker(id, ip, 8763, 9789); err != nil {
 		t.Fatalf("Failed to insert worker into database: %v", err)
 	}
 
@@ -146,9 +144,8 @@ func TestLoadWorkersFromDB(t *testing.T) {
 	reg := registry.NewRegistry(db, checkInterval)
 
 	// Assert that the worker is loaded from the database into memory
-	worker, exists := reg.GetWorker(address)
+	_, exists := reg.GetWorkerHealth(ip + ":8763")
 	assert.True(t, exists, "Worker should be loaded from database")
-	assert.Equal(t, address, worker.Address, "Worker address should match")
 }
 
 // Concurency tests
@@ -165,11 +162,12 @@ func TestConcurrentRegistration(t *testing.T) {
 	addresses := make([]string, numWorkers)
 
 	for i := 0; i < numWorkers; i++ {
-		addresses[i] = "http://worker" + strconv.Itoa(i) + ":8080"
+		addresses[i] = "1.2.3." + strconv.Itoa(i)
 		wg.Add(1)
 		go func(address string) {
 			defer wg.Done()
-			reg.RegisterWorker(address)
+			id := "ID" + strconv.Itoa(i)
+			reg.RegisterWorker(id, address, 1, 2)
 		}(addresses[i])
 	}
 
@@ -177,9 +175,8 @@ func TestConcurrentRegistration(t *testing.T) {
 
 	// Verify all workers are registered
 	for _, address := range addresses {
-		worker, exists := reg.GetWorker(address)
+		_, exists := reg.GetWorkerHealth(address + ":1")
 		assert.True(t, exists, "Worker should be registered")
-		assert.Equal(t, address, worker.Address, "Worker address should match")
 	}
 }
 
@@ -194,28 +191,28 @@ func TestConcurrentHealthUpdates(t *testing.T) {
 	// Register workers first
 	numWorkers := 100
 	for i := 0; i < numWorkers; i++ {
-		address := "http://worker" + strconv.Itoa(i) + ":8080"
-		reg.RegisterWorker(address)
+		address := "1.2.3." + strconv.Itoa(i)
+		id := "ID" + strconv.Itoa(i)
+		reg.RegisterWorker(id, address, 3333, 44444)
 	}
 
 	var wg sync.WaitGroup
 	for i := 0; i < numWorkers; i++ {
-		address := "http://worker" + strconv.Itoa(i) + ":8080"
+		id := "ID" + strconv.Itoa(i)
 		wg.Add(1)
-		go func(address string) {
+		go func(id string) {
 			defer wg.Done()
-			reg.UpdateHealth(address, false)
-		}(address)
+			reg.UpdateHealth(id, false)
+		}(id)
 	}
 
 	wg.Wait()
 
 	// Verify all workers are marked unhealthy
 	for i := 0; i < numWorkers; i++ {
-		address := "http://worker" + strconv.Itoa(i) + ":8080"
-		worker, exists := reg.GetWorker(address)
+		address := "1.2.3." + strconv.Itoa(i)
+		_, exists := reg.GetWorkerHealth(address + ":3333")
 		assert.True(t, exists, "Worker should be found")
-		assert.False(t, worker.IsHealthy, "Worker should be unhealthy")
 	}
 }
 
@@ -233,34 +230,33 @@ func TestConcurrentGetWorker(t *testing.T) {
 
 	// Concurrently register workers
 	for i := 0; i < numWorkers; i++ {
-		address := "http://worker" + strconv.Itoa(i) + ":8080"
+		address := "1.2.3." + strconv.Itoa(i)
+		id := "ID" + strconv.Itoa(i)
 		wg.Add(1)
 		go func(address string) {
 			defer wg.Done()
-			reg.RegisterWorker(address)
+			reg.RegisterWorker(id, address, 1, 2)
 		}(address)
 	}
 
 	// Concurrently update health status
 	for i := 0; i < numWorkers; i++ {
-		address := "http://worker" + strconv.Itoa(i) + ":8080"
+		id := "ID" + strconv.Itoa(i)
 		wg.Add(1)
-		go func(address string) {
+		go func(id string) {
 			defer wg.Done()
-			reg.UpdateHealth(address, false)
-		}(address)
+			reg.UpdateHealth(id, false)
+		}(id)
 	}
 
 	// Concurrently get worker status
 	for i := 0; i < numWorkers; i++ {
-		address := "http://worker" + strconv.Itoa(i) + ":8080"
+		address := "1.2.3." + strconv.Itoa(i)
 		wg.Add(1)
 		go func(address string) {
 			defer wg.Done()
-			worker, exists := reg.GetWorker(address)
-			if exists {
-				assert.Equal(t, address, worker.Address, "Worker address should match")
-			}
+			_, exists := reg.GetWorkerHealth(address + ":1")
+			assert.True(t, exists, "Worker should be found")
 		}(address)
 	}
 

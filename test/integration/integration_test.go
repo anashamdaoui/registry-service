@@ -3,6 +3,7 @@ package integration
 import (
 	"bytes"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"registry-service/internal/config"
@@ -18,7 +19,6 @@ import (
 )
 
 // Test Setup:
-// - setupIntegrationDB is used to initialize a clean database state before each test, ensuring that each test runs independently.
 // - The init function ensures that configuration settings are loaded from the config.json file before tests are executed.
 func init() {
 	// Load the configuration from the config file
@@ -27,7 +27,7 @@ func init() {
 	middleware.InitLogger(config.AppConfig.LogLevel)
 }
 
-// setupIntegrationDB initializes a clean database state for integration tests.
+// - setupIntegrationDB initializes a clean database state for integration tests.
 func setupIntegrationDB(t *testing.T) *database.MongoDB {
 	// Connect to the MongoDB instance
 	db, err := database.NewMongoDB(config.AppConfig.DB.URI, config.AppConfig.DB.Name, config.AppConfig.DB.Collection)
@@ -40,7 +40,7 @@ func setupIntegrationDB(t *testing.T) *database.MongoDB {
 	return db
 }
 
-// setupTestServer starts a test HTTP server for the registry service.
+// - setupTestServer starts a test HTTP server for the registry service.
 func setupTestServer(db *database.MongoDB) (*httptest.Server, *registry.Registry) {
 	checkInterval := time.Duration(config.AppConfig.CheckIntervalMs) * time.Millisecond
 	reg := registry.NewRegistry(db, checkInterval)
@@ -52,10 +52,11 @@ func setupTestServer(db *database.MongoDB) (*httptest.Server, *registry.Registry
 }
 
 // Send a POST /register to the registry server with worker port in the body
-func registerWorker(registryURL string, id string, port int, apiKey string) (*http.Response, error) {
+func registerWorker(registryURL string, id string, httpport int, grpcport int, apiKey string) (*http.Response, error) {
 	workerData := map[string]interface{}{
-		"id":   id,
-		"port": port,
+		"id":       id,
+		"httpport": httpport,
+		"grpcport": grpcport,
 	}
 
 	jsonData, _ := json.Marshal(workerData)
@@ -88,8 +89,8 @@ func TestIntegrationRegisterWorker(t *testing.T) {
 	ts, _ := setupTestServer(db)
 	defer ts.Close()
 
-	address := "http://127.0.0.1:1234"
-	resp, err := registerWorker(ts.URL, "1-2-3-4", 1234, config.AppConfig.APIKey)
+	ip := "127.0.0.1"
+	resp, err := registerWorker(ts.URL, "workerID-test-1", 1234, 4321, config.AppConfig.APIKey)
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
@@ -97,7 +98,9 @@ func TestIntegrationRegisterWorker(t *testing.T) {
 	workers, err := db.GetAllWorkers()
 	assert.NoError(t, err)
 	assert.Len(t, workers, 1)
-	assert.Equal(t, address, workers[0]["address"])
+	assert.Equal(t, ip, workers[0]["host"])
+
+	db.ClearCollection()
 }
 
 // TestIntegrationGetWorkerHealth tests retrieving the health status of a worker.
@@ -108,11 +111,11 @@ func TestIntegrationGetWorkerHealth(t *testing.T) {
 	ts, reg := setupTestServer(db)
 	defer ts.Close()
 
-	address := "http://worker.domain:1234"
-	_ = db.InsertWorker(address)
-	reg.RegisterWorker(address) // register the server in the registry cache
+	address := "1.2.3.4"
+	id := "workerID-test-2"
+	reg.RegisterWorker(id, address, 1, 2) // register the server in the registry cache and DB
 
-	req, err := http.NewRequest("GET", ts.URL+"/worker/health?address="+address, nil)
+	req, err := http.NewRequest("GET", ts.URL+"/worker/health?address="+address+":1", nil)
 	assert.NoError(t, err)
 
 	// Include API Key in the request header
@@ -122,10 +125,12 @@ func TestIntegrationGetWorkerHealth(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-	var worker registry.Worker
-	err = json.NewDecoder(resp.Body).Decode(&worker)
+	var response server.HealthResponse
+	err = json.NewDecoder(resp.Body).Decode(&response)
 	assert.NoError(t, err)
-	assert.Equal(t, address, worker.Address)
+	assert.Equal(t, "healthy", response.HealthStatus)
+
+	db.ClearCollection()
 }
 
 // TestIntegrationGetHealthyWorkers tests retrieving all healthy workers.
@@ -136,9 +141,9 @@ func TestIntegrationGetHealthyWorkers(t *testing.T) {
 	ts, reg := setupTestServer(db)
 	defer ts.Close()
 
-	address1 := "http://worker3:8080"
-	_ = db.InsertWorker(address1)
-	reg.RegisterWorker(address1) // register the server in the registry cache
+	address := "1.2.3.4"
+	id := "workerID-test-3"
+	reg.RegisterWorker(id, address, 1, 2) // register the server in the registry cache
 
 	req, err := http.NewRequest("GET", ts.URL+"/workers/healthy", nil)
 	assert.NoError(t, err)
@@ -154,7 +159,9 @@ func TestIntegrationGetHealthyWorkers(t *testing.T) {
 	err = json.NewDecoder(resp.Body).Decode(&addresses)
 	assert.NoError(t, err)
 	assert.Len(t, addresses, 1) // Only one worker should be healthy
-	assert.Equal(t, address1, addresses[0])
+	assert.Equal(t, address+":1", addresses[0])
+
+	db.ClearCollection()
 }
 
 // TestIntegrationHealthCheckLoop verifies that the health check loop updates worker health.
@@ -177,7 +184,12 @@ func TestIntegrationHealthCheckLoop(t *testing.T) {
 	defer mockWorker.Close()
 
 	address := mockWorker.URL
-	reg.RegisterWorker(address) // register the server in the registry cache
+	host, portstr, err := middleware.GetHostAndPortFromURL(address)
+	assert.NoError(t, err)
+
+	port := portstr
+	log.Printf("MockWorker IP : %s Port : %d", host, port)
+	reg.RegisterWorker("workerID-test-4", host, port, 2) // register the server in the registry cache. Injection in the DB will fail as the port is random.
 
 	// Wait for the health check loop to run
 	time.Sleep(2 * time.Second)
@@ -193,8 +205,10 @@ func TestIntegrationHealthCheckLoop(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-	var worker registry.Worker
-	err = json.NewDecoder(resp.Body).Decode(&worker)
+	var response server.HealthResponse
+	err = json.NewDecoder(resp.Body).Decode(&response)
 	assert.NoError(t, err)
-	assert.True(t, worker.IsHealthy, "Worker should be healthy after health check loop")
+	assert.Equal(t, "healthy", response.HealthStatus)
+
+	db.ClearCollection()
 }

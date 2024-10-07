@@ -2,7 +2,6 @@ package server
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"registry-service/internal/middleware"
@@ -36,8 +35,9 @@ func registerHandler(w http.ResponseWriter, r *http.Request, reg *registry.Regis
 	}
 
 	var requestData struct {
-		ID   string `json:"id"`
-		Port int    `json:"port"`
+		ID       string `json:"id"`
+		HTTPPort int32  `json:"httpport"`
+		GRPCPort int32  `json:"grpcport"`
 	}
 
 	err := json.NewDecoder(r.Body).Decode(&requestData)
@@ -47,9 +47,8 @@ func registerHandler(w http.ResponseWriter, r *http.Request, reg *registry.Regis
 		return
 	}
 
-	workerIP := fmt.Sprintf("%s:%d", ip, requestData.Port)
-	logger.Debug(requestID, "Worker IP:Port = %s\n", workerIP)
-	reg.RegisterWorker("http://" + workerIP)
+	logger.Debug(requestID, "Worker ID : %s\n\tIP : %s\n\tHTTP Port : %d\n\tGRPC Port : %d\n", requestData.ID, ip, requestData.HTTPPort, requestData.GRPCPort)
+	reg.RegisterWorker(requestData.ID, ip, requestData.HTTPPort, requestData.GRPCPort)
 
 	w.WriteHeader(http.StatusOK)
 	if _, err := w.Write([]byte("Worker registered")); err != nil {
@@ -57,24 +56,36 @@ func registerHandler(w http.ResponseWriter, r *http.Request, reg *registry.Regis
 	}
 }
 
+type HealthResponse struct {
+	HealthStatus string `json:"health_status"`
+}
+
 func workerHealthHandler(w http.ResponseWriter, r *http.Request, reg *registry.Registry) {
 	requestID := middleware.GetRequestIDFromContext(r.Context())
 	logger := middleware.GetLogger()
-	logger.Debug(requestID, "Handling /worker/health request")
 
-	address := r.URL.Query().Get("address")
-	if address == "" {
+	url := r.URL.Query().Get("address")
+	if url == "" {
 		http.Error(w, "Missing address", http.StatusBadRequest)
 		return
 	}
-	logger.Debug(requestID, "Received health check request for address: %s", address)
+	logger.Debug(requestID, "Handling /worker/health request for address : %s", url)
 
-	worker, found := reg.GetWorker(address)
+	bIsHealthy, found := reg.GetWorkerHealth(url)
 	if !found {
 		http.NotFound(w, r)
 		return
 	}
-	if err := json.NewEncoder(w).Encode(worker); err != nil {
+
+	health_status := "unhealthy"
+	if bIsHealthy {
+		health_status = "healthy"
+	}
+	data := HealthResponse{
+		HealthStatus: health_status,
+	}
+
+	if err := json.NewEncoder(w).Encode(data); err != nil {
 		logger.Debug(requestID, "Error encoding response: %v", err)
 	}
 }
@@ -84,8 +95,7 @@ func healthyWorkersHandler(w http.ResponseWriter, r *http.Request, reg *registry
 	logger := middleware.GetLogger()
 	logger.Debug(requestID, "Handling /workers/healthy request")
 
-	logger.Debug(requestID, "Received request for healthy workers")
-	addresses := reg.GetHealthyWorkersAddress()
+	addresses := reg.GetHealthyWorkersURL()
 	if err := json.NewEncoder(w).Encode(addresses); err != nil {
 		logger.Debug(requestID, "Error encoding response: %v", err)
 	}

@@ -4,8 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
-	"regexp"
+	"net"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -67,7 +66,7 @@ func (db *MongoDB) CreateIndexes() error {
 	logger := middleware.GetLogger()
 
 	indexModel := mongo.IndexModel{
-		Keys:    bson.D{{Key: "address", Value: 1}},
+		Keys:    bson.D{{Key: "id", Value: 1}},
 		Options: options.Index().SetUnique(true),
 	}
 
@@ -82,19 +81,22 @@ func (db *MongoDB) CreateIndexes() error {
 }
 
 // InsertWorker inserts a new worker into the collection
-func (db *MongoDB) InsertWorker(address string) error {
+func (db *MongoDB) InsertWorker(id string, host string, httpport int32, grpcport int32) error {
 	logger := middleware.GetLogger()
 
-	// Validate address
-	if !isValidAddress(address) {
-		logger.Info("DB - ", "Invalid worker address: %s", address)
-		return errors.New("invalid worker address")
+	// Expect a validate IP address
+	if net.ParseIP(host) == nil {
+		logger.Info("DB - ", "Invalid worker IP: %s", host)
+		return errors.New("invalid worker IP")
 	}
 
-	logger.Debug("DB - ", "Inserting new worker with address: %s", address)
+	logger.Debug("DB - ", "Inserting new worker: host %s http port %d grpc port %d", host, httpport, grpcport)
 
 	worker := bson.M{
-		"address":           address,
+		"id":                id,
+		"host":              host,
+		"http_port":         int32(httpport), // MongoDB supports int32 or int64 and defaults to int64, thus must cast to int32 when inserting values in DB
+		"grpc_port":         int32(grpcport), // MongoDB supports int32 or int64 and defaults to int64, thus must cast to int32 when inserting values in DB
 		"is_healthy":        true,
 		"last_health_check": time.Now(),
 	}
@@ -102,24 +104,18 @@ func (db *MongoDB) InsertWorker(address string) error {
 	if err != nil {
 		logger.Info("DB - ", "Failed to insert worker: %v", err)
 	} else {
-		logger.Debug("DB - ", "Worker inserted successfully with address: %s", address)
+		logger.Debug("DB - ", "Worker inserted successfully with id %s", id)
 	}
 	return err
 }
 
 // UpdateWorkerHealth updates the health status of a worker
-func (db *MongoDB) UpdateWorkerHealth(address string, isHealthy bool) error {
+func (db *MongoDB) UpdateWorkerHealth(id string, isHealthy bool) error {
 	logger := middleware.GetLogger()
 
-	// Validate address
-	if !isValidAddress(address) {
-		logger.Info("DB - ", "Invalid worker address: %s", address)
-		return errors.New("invalid worker address")
-	}
+	logger.Debug("DB - ", "Updating health for worker with id %s", id)
 
-	logger.Debug("DB - ", "Updating health for worker with address: %s", address)
-
-	filter := bson.M{"address": address}
+	filter := bson.M{"id": id}
 	update := bson.M{
 		"$set": bson.M{
 			"is_healthy":        isHealthy,
@@ -130,7 +126,7 @@ func (db *MongoDB) UpdateWorkerHealth(address string, isHealthy bool) error {
 	if err != nil {
 		logger.Info("DB - ", "Failed to update worker health: %v", err)
 	} else {
-		logger.Debug("DB - ", "Worker health updated successfully for address: %s", address)
+		logger.Debug("DB - ", "Worker health updated successfully")
 	}
 	return err
 }
@@ -170,49 +166,16 @@ func (db *MongoDB) ClearCollection() error {
 }
 
 // DeleteWorker removes a worker from the MongoDB collection
-func (db *MongoDB) DeleteWorker(address string) error {
+func (db *MongoDB) DeleteWorker(id string) error {
 	logger := middleware.GetLogger()
 
-	logger.Debug("DB - ", "Removing worker with address %v", address)
-	filter := bson.M{"address": address}
+	logger.Debug("DB - ", "Removing worker with id %s", id)
+	filter := bson.M{"id": id}
 	_, err := db.collection.DeleteOne(context.TODO(), filter)
 	if err != nil {
 		logger.Debug("DB - ", "Failed to delete worker from database: %v", err)
 	} else {
-		logger.Debug("DB - ", "Worker with address %v deleted successfully.", address)
+		logger.Debug("DB - ", "Worker deleted successfully.")
 	}
 	return err
-}
-
-// isValidAddress checks if the address string is valid
-/*
-1. URL Parsing: The net/url package is used to parse the address string. This helps ensure that the string is a properly formatted URL and can detect obvious structural errors.
-2. Scheme Validation: After parsing, we check that the scheme is either http or https. This prevents other schemes (e.g., file, ftp, etc.) from being accepted.
-3. Host Validation: We ensure that the host part of the URL is not empty, preventing URLs that don't point to a valid domain.
-4. Regular Expression: The regex pattern is used to match common URL components while filtering out potentially malicious or malformed data. The pattern matches:
-- The scheme (either http or https).
-- A valid URL path and query string, allowing for most typical characters found in URLs.
-*/
-func isValidAddress(address string) bool {
-	// Check if the address can be parsed as a URL
-	parsedURL, err := url.Parse(address)
-	if err != nil {
-		return false
-	}
-
-	// Ensure the scheme is either http or https
-	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
-		return false
-	}
-
-	// Check that the host is not empty
-	if parsedURL.Host == "" {
-		return false
-	}
-
-	// Check for invalid characters using a regular expression
-	// This regex checks for a simple URL pattern: scheme://host/path
-	// Adjust the pattern according to your specific security requirements
-	var urlRegex = regexp.MustCompile(`^(http|https):\/\/[a-zA-Z0-9-._~:\/?#\[\]@!$&'()*+,;=%]+$`)
-	return urlRegex.MatchString(address)
 }
