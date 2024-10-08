@@ -1,7 +1,6 @@
 package registry
 
 import (
-	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -57,7 +56,6 @@ func (r *Registry) loadWorkersFromDB() {
 			IsHealthy:       isHealthy,
 			LastHealthCheck: lastHealthCheck,
 		}
-		fmt.Printf("REGISTRY CACHE (loadWorkersFromDB): id %s %+v\n", id, r)
 	}
 }
 
@@ -66,7 +64,6 @@ func (r *Registry) startHealthCheckLoop() {
 	logger := middleware.GetLogger()
 	ticker := time.NewTicker(r.checkInterval)
 	defer ticker.Stop()
-	fmt.Printf("REGISTRY CACHE (startHealthCheckLoop): %+v\n", r)
 
 	for {
 		select {
@@ -87,7 +84,6 @@ func (r *Registry) StopHealthCheck() {
 // Register a new worker
 func (r *Registry) RegisterWorker(id string, host string, httpPort int32, grpcPort int32) {
 	r.mutex.Lock()
-	fmt.Printf("REGISTRY CACHE (RegisterWorker): %+v\n", r)
 	defer r.mutex.Unlock()
 
 	logger := middleware.GetLogger()
@@ -181,7 +177,6 @@ func (r *Registry) CheckAllWorkers() {
 	r.mutex.Lock()
 	workers := r.workers
 	r.mutex.Unlock()
-	fmt.Printf("REGISTRY CACHE (CheckAllWorkers): %+v\n", workers)
 
 	isHealthy := false
 	for key := range workers {
