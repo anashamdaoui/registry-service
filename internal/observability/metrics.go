@@ -35,7 +35,7 @@ var (
 			Name: "worker_health_status",
 			Help: "Health status of workers (1 for healthy, 0 for unhealthy).",
 		},
-		[]string{"address"},
+		[]string{"id", "address"},
 	)
 )
 
@@ -74,13 +74,13 @@ func (w *statusWriter) WriteHeader(statusCode int) {
 }
 
 // RecordWorkerHealth updates the worker health metric
-func RecordWorkerHealth(address string, isHealthy bool) {
+func RecordWorkerHealth(id string, address string, isHealthy bool) {
 	value := 0.0
 	if isHealthy {
 		value = 1.0
 	}
-	middleware.GetLogger().Debug("Metrics - Recording health for worker %s: %f\n", address, value)
-	workerHealthStatus.WithLabelValues(address).Set(value)
+	middleware.GetLogger().Debug("", "Metrics - Recording health for worker ID %s (%s): %f\n", id, address, value)
+	workerHealthStatus.WithLabelValues(id, address).Set(value)
 }
 
 var metricsOnce sync.Once

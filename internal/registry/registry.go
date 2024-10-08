@@ -1,12 +1,15 @@
 package registry
 
 import (
+	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"registry-service/internal/config"
 	"registry-service/internal/database"
 	"registry-service/internal/middleware"
 	"registry-service/internal/observability"
+	"strconv"
 	"sync"
 	"time"
 
@@ -40,15 +43,21 @@ func (r *Registry) loadWorkersFromDB() {
 	}
 
 	for _, w := range workers {
-		address := w["address"].(string)
+		id := w["id"].(string)
+		host := w["host"].(string)
+		httpport := w["http_port"].(int32) // values are stored as int32
+		grpcport := w["grpc_port"].(int32) // values are stored as int32
 		isHealthy := w["is_healthy"].(bool)
 		lastHealthCheck := w["last_health_check"].(primitive.DateTime).Time()
 
-		r.workers[address] = &Worker{
-			Address:         address,
+		r.workers[id] = &Worker{
+			Host:            host,
+			HTTPPort:        httpport,
+			GRPCPort:        grpcport,
 			IsHealthy:       isHealthy,
 			LastHealthCheck: lastHealthCheck,
 		}
+		fmt.Printf("REGISTRY CACHE (loadWorkersFromDB): id %s %+v\n", id, r)
 	}
 }
 
@@ -57,6 +66,7 @@ func (r *Registry) startHealthCheckLoop() {
 	logger := middleware.GetLogger()
 	ticker := time.NewTicker(r.checkInterval)
 	defer ticker.Stop()
+	fmt.Printf("REGISTRY CACHE (startHealthCheckLoop): %+v\n", r)
 
 	for {
 		select {
@@ -75,44 +85,47 @@ func (r *Registry) StopHealthCheck() {
 }
 
 // Register a new worker
-func (r *Registry) RegisterWorker(address string) {
+func (r *Registry) RegisterWorker(id string, host string, httpPort int32, grpcPort int32) {
 	r.mutex.Lock()
+	fmt.Printf("REGISTRY CACHE (RegisterWorker): %+v\n", r)
 	defer r.mutex.Unlock()
 
 	logger := middleware.GetLogger()
 
-	logger.Debug("", "Registring Worker with address %v", address)
+	logger.Debug("", "Registring Worker with IP %s HTTP port %d GRPC port %d", host, httpPort, grpcPort)
 
-	worker, exists := r.workers[address]
+	// Use the worker ID as mapping key
+	worker, exists := r.workers[id]
 	if !exists {
 		logger.Debug("", "Worker cache miss, insert in Cache and DB")
-		worker = &Worker{Address: address, IsHealthy: true, LastHealthCheck: time.Now()}
-		r.workers[address] = worker
-		if err := r.db.InsertWorker(address); err != nil {
+		worker = &Worker{Host: host, HTTPPort: httpPort, GRPCPort: grpcPort, IsHealthy: true, LastHealthCheck: time.Now()}
+		r.workers[id] = worker
+		if err := r.db.InsertWorker(id, host, httpPort, grpcPort); err != nil {
 			logger.Info("", "Failed to insert worker into database: %v", err)
 		}
 	} else {
 		logger.Debug("", "Worker cache match, update health status in Cache and DB")
 		worker.IsHealthy = true
 		worker.LastHealthCheck = time.Now()
-		if err := r.db.UpdateWorkerHealth(address, true); err != nil {
+		if err := r.db.UpdateWorkerHealth(id, true); err != nil {
 			logger.Info("", "Failed to update worker in database: %v", err)
 		}
 	}
 
 	// Record the health status in Prometheus metrics
-	observability.RecordWorkerHealth(address, true)
+	url := middleware.GetURLFromHostPort(host, httpPort)
+	observability.RecordWorkerHealth(id, url, true)
 }
 
 // UpdateHealth updates the health status of a worker
-func (r *Registry) UpdateHealth(address string, isHealthy bool) {
+func (r *Registry) UpdateHealth(id string, isHealthy bool) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
 	logger := middleware.GetLogger()
-	logger.Debug("", "UpdateHealth worker address %s isHealthy %v", address, isHealthy)
+	logger.Debug("", "UpdateHealth worker ID %s isHealthy %v", id, isHealthy)
 
-	worker, exists := r.workers[address]
+	worker, exists := r.workers[id]
 	if !exists {
 		return
 	}
@@ -120,12 +133,13 @@ func (r *Registry) UpdateHealth(address string, isHealthy bool) {
 	if worker.IsHealthy != isHealthy {
 		worker.IsHealthy = isHealthy
 		worker.LastHealthCheck = time.Now()
-		if err := r.db.UpdateWorkerHealth(address, isHealthy); err != nil {
+		if err := r.db.UpdateWorkerHealth(id, isHealthy); err != nil {
 			logger.Info("Cache - ", "Failed to update worker in database: %v", err)
 		}
 
 		// Record the health status in Prometheus metrics
-		observability.RecordWorkerHealth(address, isHealthy)
+		url := middleware.GetURLFromHostPort(worker.Host, worker.HTTPPort)
+		observability.RecordWorkerHealth(id, url, isHealthy)
 	}
 }
 
@@ -167,18 +181,20 @@ func (r *Registry) CheckAllWorkers() {
 	r.mutex.Lock()
 	workers := r.workers
 	r.mutex.Unlock()
+	fmt.Printf("REGISTRY CACHE (CheckAllWorkers): %+v\n", workers)
 
 	isHealthy := false
-	for address := range workers {
+	for key := range workers {
 
-		logger.Debug("", "Checking health of worker at address: %s", address)
+		url := middleware.GetURLFromHostPort(workers[key].Host, workers[key].HTTPPort)
+		logger.Debug("", "Checking health of worker at url: %s", url)
 
 		retries := 4
 		for i := 0; i < retries; i++ {
-			isHealthy = getWorkerHealth(address+"/healthcheck", config.AppConfig.APIKey)
+			isHealthy = getWorkerHealth(url+"/healthcheck", config.AppConfig.APIKey)
 			if isHealthy {
-				r.UpdateHealth(address, true)
-				logger.Debug("", "Worker %s is healthy", address)
+				r.UpdateHealth(key, true)
+				logger.Debug("", "Worker %s is healthy", url)
 				break
 			} else {
 				// Log the error and retry
@@ -186,62 +202,70 @@ func (r *Registry) CheckAllWorkers() {
 				if i < retries {
 					str = " Retrying..."
 				}
-				logger.Debug("", "Try #%d: Error checking worker (%s) health.%s", i, address, str)
+				logger.Debug("", "Try #%d: Error checking worker (%s) health.%s", i, url, str)
 			}
 			time.Sleep(100 * time.Millisecond) // Backoff
 		}
 
 		if !isHealthy {
-			logger.Info("", "Worker %s is not healthy after retries. Removing it from cache and database.", address)
-			r.RemoveWorker(address)
+			logger.Info("", "Worker %s is not healthy after retries. Removing it from cache and database.", url)
+			r.RemoveWorker(key)
 		}
 	}
 }
 
 // RemoveWorker removes a worker from the cache and database
-func (r *Registry) RemoveWorker(address string) {
+func (r *Registry) RemoveWorker(key string) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
 	logger := middleware.GetLogger()
 
-	logger.Debug("Cache - ", "Removing worker with address %v", address)
-	delete(r.workers, address)
-	if err := r.db.DeleteWorker(address); err != nil {
+	logger.Debug("Cache - ", "Removing worker with id %s", key)
+	delete(r.workers, key)
+	if err := r.db.DeleteWorker(key); err != nil {
 		logger.Info("DB - ", "Failed to delete worker from database: %v", err)
 	}
 }
 
-// GetWorker retrieves a worker by its address.
-func (r *Registry) GetWorker(address string) (*Worker, bool) {
+// GetWorkerHealth retrieves a worker by its address.
+func (r *Registry) GetWorkerHealth(url string) (ishealthy bool, found bool) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
 	logger := middleware.GetLogger()
-	logger.Debug("Cache - ", "Starting GetWorker...")
 
-	worker, exists := r.workers[address]
+	for key := range r.workers {
+		host, port, _ := middleware.GetHostAndPortFromURL(url)
+		if r.workers[key].Host == host && r.workers[key].HTTPPort == port {
+			logger.Debug("Cache - ", "Get worker %s health: %v", url, true)
+			return r.workers[key].IsHealthy, true
+		}
+	}
 
-	logger.Debug("Cache -", "Completed GetWorker.")
+	logger.Debug("Cache - ", "Get worker %s health: Not found", url)
 
-	return worker, exists
+	return false, false
 }
 
 // GetHealthyWorkers retrieves all healthy workers.
-func (r *Registry) GetHealthyWorkersAddress() []string {
+func (r *Registry) GetHealthyWorkersURL() []string {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
 	logger := middleware.GetLogger()
-	logger.Debug("Cache - ", "Starting GetHealthyWorkers...")
+	logger.Debug("Cache - ", "Starting GetHealthyWorkersURL...")
 
 	// By design only healthy workers are kept in the cache and the DB.
-	addresses := make([]string, 0, len(r.workers))
-	for addresse := range r.workers {
-		addresses = append(addresses, addresse)
+	urls := make([]string, 0, len(r.workers))
+	for key := range r.workers {
+		host := r.workers[key].Host
+		port := strconv.Itoa(int(r.workers[key].HTTPPort))
+		url := net.JoinHostPort(host, port)
+		urls = append(urls, url)
 	}
 
 	logger.Debug("Cache - ", "Completed GetHealthyWorkers.")
 
-	return addresses
+	return urls
 }
